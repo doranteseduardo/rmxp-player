@@ -12,6 +12,8 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 - ✅ Rodio audio backend initialization stub.
 - ✅ Platform helper for config directories and logging bootstrap.
 - ✅ `rmxp-data` crate with a Marshal (Ruby 4.8) parser + JSON helpers.
+- ✅ System/MapInfos parsing + color-coded debug map rendering sourced from the
+  project's start map (when `RMXP_GAME_PATH` is set).
 - 🚧 Pending: real RGSS embedding, map renderer, input mapping, event system,
   audio playback, save/load, and mobile launchers.
 
@@ -34,11 +36,12 @@ crates/
 ## Running (Desktop)
 
 ```bash
-cargo run -p desktop-runner
+RMXP_GAME_PATH=/absolute/path/to/rmxp/game cargo run -p desktop-runner
 ```
 
 Environment variables:
 
+- `RMXP_GAME_PATH` – absolute path to the RMXP project folder (expects `Data/System.rxdata`).
 - `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
 
 ## Next Steps

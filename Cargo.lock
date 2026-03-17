@@ -581,6 +581,7 @@ dependencies = [
  "platform",
  "render",
  "rgss-bindings",
+ "rmxp-data",
  "serde",
  "serde_json",
  "tracing",

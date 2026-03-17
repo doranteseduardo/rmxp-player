@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use audio::AudioSystem;
 use platform::{self, EngineConfig};
-use render::Renderer;
+use project::{GameDatabase, GameProject};
+use render::{Renderer, TileDebugView};
 use rgss_bindings::RubyVm;
-use tracing::warn;
+use rmxp_data::MapData;
+use tracing::{info, warn};
 use winit::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
@@ -11,6 +13,8 @@ use winit::{
     window::WindowBuilder,
 };
 use winit_input_helper::WinitInputHelper;
+
+mod project;
 
 #[derive(Debug, Clone, Default)]
 pub struct AppConfig {
@@ -40,6 +44,37 @@ pub fn run(config: AppConfig) -> Result<()> {
     platform::app_paths().context("initializing app paths")?;
     let stored = platform::load_or_default();
     let cfg = config.finalize(stored);
+
+    let project = match GameProject::from_env() {
+        Ok(project) => {
+            info!(target: "project", root = ?project.data_dir(), "Project path resolved");
+            Some(project)
+        }
+        Err(err) => {
+            warn!(
+                target: "project",
+                error = %err,
+                "No RMXP project configured; set RMXP_GAME_PATH"
+            );
+            None
+        }
+    };
+
+    let (_database, tile_view) = if let Some(project_ref) = project.as_ref() {
+        match project_ref.load_database() {
+            Ok(db) => {
+                db.log_summary();
+                let view = build_initial_tile_view(project_ref, &db);
+                (Some(db), view)
+            }
+            Err(err) => {
+                warn!(target: "project", error = %err, "Failed to load project data");
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -81,7 +116,7 @@ pub fn run(config: AppConfig) -> Result<()> {
                     }
                     WindowEvent::CloseRequested => target.exit(),
                     WindowEvent::RedrawRequested => {
-                        if let Err(err) = renderer.render(frame_index) {
+                        if let Err(err) = renderer.render(frame_index, tile_view.as_ref()) {
                             warn!(target: "render", error = %err, "render error, exiting");
                             target.exit();
                             return;
@@ -103,4 +138,32 @@ pub fn run(config: AppConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn build_initial_tile_view(project: &GameProject, db: &GameDatabase) -> Option<TileDebugView> {
+    let system = db.system.as_ref()?;
+    let map_id = system.start_map_id.max(1);
+    match project.load_map(map_id) {
+        Ok(map) => map_to_tile_view(&map),
+        Err(err) => {
+            warn!(
+                target: "project",
+                error = %err,
+                "Failed to load start map {}",
+                map_id
+            );
+            None
+        }
+    }
+}
+
+fn map_to_tile_view(map: &MapData) -> Option<TileDebugView> {
+    let width = map.width.max(1) as usize;
+    let height = map.height.max(1) as usize;
+    let tiles = map.data.plane(0)?;
+    Some(TileDebugView {
+        width,
+        height,
+        tiles,
+    })
 }

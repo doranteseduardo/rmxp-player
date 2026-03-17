@@ -12,5 +12,6 @@ render = { path = "../render" }
 audio = { path = "../audio" }
 platform = { path = "../platform" }
 rgss-bindings = { path = "../rgss-bindings" }
+rmxp-data = { path = "../data" }
 serde = { workspace = true }
 serde_json = { workspace = true }

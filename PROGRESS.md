@@ -11,20 +11,20 @@
   logging with `RMXP_LOG` filtering.
 - RGSS bindings crate contains a stub `RubyVm` placeholder for the future MRI
   embedding layer.
-- Added `rmxp-data` crate with a Marshal reader/JSON bridge to inspect `.rxdata`
-  contents.
+- Added `rmxp-data` crate with a Marshal reader/JSON bridge plus engine wiring
+  that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
+- Engine now parses the start map and feeds a color-coded tileview into the
+  renderer so we can visualize real `.rxdata` content end-to-end.
 
 ## 🚧 Immediate Goals
 
-1. **Resource Loader Integration** – plug `rmxp-data` into `engine-core` and load
-   real RMXP database/system files.
-2. **Rendering Roadmap** – replace the gradient with tilemap + sprite batching
-   using actual RMXP assets and Table data.
-3. **Input & Loop** – encode fixed-timestep scheduling, keyboard/gamepad/touch
+1. **Tileset Rendering** – swap the debug colors for actual tileset textures and
+   handle priorities/auto-tiles using the parsed map data.
+2. **Input & Loop** – encode fixed-timestep scheduling, keyboard/gamepad/touch
    mapping, and state machines for player movement.
-4. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fading, looping,
+3. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fading, looping,
    and MIDI via `rustysynth`.
-5. **RGSS Integration** – embed Ruby MRI, expose RGSS classes, and drive the
+4. **RGSS Integration** – embed Ruby MRI, expose RGSS classes, and drive the
    scene stack via scripts.
-6. **Mobile Shells** – add Swift/Kotlin launchers that delegate to the shared
+5. **Mobile Shells** – add Swift/Kotlin launchers that delegate to the shared
    Rust engine.
