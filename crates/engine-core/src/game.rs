@@ -328,6 +328,19 @@ impl GameState {
                 ],
                 viewport,
             );
+            let flash_empty = sprite.flash.as_ref().map(|f| f.empty).unwrap_or(false);
+            let flash_color = sprite.flash.as_ref().and_then(|flash| {
+                if flash.empty {
+                    None
+                } else {
+                    Some([
+                        flash.color.red,
+                        flash.color.green,
+                        flash.color.blue,
+                        flash.color.alpha,
+                    ])
+                }
+            });
             self.sprites.push(SpriteInstance {
                 texture: bitmap,
                 src_rect: (src_x, src_y, src_w, src_h),
@@ -344,6 +357,8 @@ impl GameState {
                 bush_depth: sprite.bush_depth.max(0) as u32,
                 bush_opacity: sprite.bush_opacity.clamp(0, 255) as u8,
                 clip,
+                flash_color,
+                flash_empty,
             });
         }
     }

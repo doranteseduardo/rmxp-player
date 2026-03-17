@@ -25,7 +25,9 @@
   `Bitmap#get_pixel`/`set_pixel`, `Bitmap#clear`, plus `Graphics.freeze`,
   `Graphics.snap_to_bitmap`, and the tone/brightness/flash pipeline manipulate
   the same textures the renderer consumes, while script-level Cache logic is
-  left entirely to project `Scripts.rxdata`.
+  left entirely to project `Scripts.rxdata`. Hue shifts (`Bitmap#hue_change`)
+  and per-sprite flashes now route through the native renderer instead of Ruby
+  shims.
 - `Bitmap#stretch_blt`, `Bitmap#gradient_fill_rect`, and `Bitmap#draw_text` now
   render through a built-in 8×8 ASCII font so the standard RMXP windows and UI
   code can draw text/gradients without modification.
@@ -43,6 +45,19 @@
   plane tiling, windowskin/background/contents/cursor rendering), enabling
   vanilla `Scripts.rxdata` scenes to drive the entire frame without native
   stubs.
+- Window close events no longer abort the process; instead they request a
+  `Graphics` hangup that raises the RGSS `Hangup` exception on the next
+  `Graphics.update`, matching mkxp-z’s lifecycle semantics.
+- The extended mkxp-z `System` APIs (platform/OS queries, CPU & memory info,
+  CSV parsing, launcher helpers, default font family, file existence checks) are
+  implemented, so projects that lean on those helpers no longer crash during
+  boot.
+- Input now mirrors mkxp-z’s helpers: `release?`, `count`, `time?`, mouse coords,
+  scroll deltas, clipboard/text input, and controller namespace stubs all exist,
+  with blur/tone buttons feeding the native renderer instead of Ruby shims.
+- `Graphics.blur`/`Graphics.sharpen` hook into the renderer’s screen-effects
+  pass (with frozen-frame fallbacks) so transitions that rely on those filters
+  match the RPG Maker runtime instead of silently no-oping.
 
 ## 🚧 Immediate Goals
 

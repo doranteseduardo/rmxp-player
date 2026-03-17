@@ -67,19 +67,19 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"disposed?\0"), viewport_disposed_q, 0);
         define_method(klass, cstr(b"dispose\0"), viewport_dispose, 0);
         define_method(klass, cstr(b"rect\0"), viewport_get_rect, 0);
-        define_method(klass, cstr(b"rect=\0"), viewport_set_rect, 1);
+        define_method(klass, cstr(b"rect=\0"), viewport_set_rect, -1);
         define_method(klass, cstr(b"visible\0"), viewport_get_visible, 0);
-        define_method(klass, cstr(b"visible=\0"), viewport_set_visible, 1);
+        define_method(klass, cstr(b"visible=\0"), viewport_set_visible, -1);
         define_method(klass, cstr(b"z\0"), viewport_get_z, 0);
-        define_method(klass, cstr(b"z=\0"), viewport_set_z, 1);
+        define_method(klass, cstr(b"z=\0"), viewport_set_z, -1);
         define_method(klass, cstr(b"ox\0"), viewport_get_ox, 0);
-        define_method(klass, cstr(b"ox=\0"), viewport_set_ox, 1);
+        define_method(klass, cstr(b"ox=\0"), viewport_set_ox, -1);
         define_method(klass, cstr(b"oy\0"), viewport_get_oy, 0);
-        define_method(klass, cstr(b"oy=\0"), viewport_set_oy, 1);
+        define_method(klass, cstr(b"oy=\0"), viewport_set_oy, -1);
         define_method(klass, cstr(b"color\0"), viewport_get_color, 0);
-        define_method(klass, cstr(b"color=\0"), viewport_set_color, 1);
+        define_method(klass, cstr(b"color=\0"), viewport_set_color, -1);
         define_method(klass, cstr(b"tone\0"), viewport_get_tone, 0);
-        define_method(klass, cstr(b"tone=\0"), viewport_set_tone, 1);
+        define_method(klass, cstr(b"tone=\0"), viewport_set_tone, -1);
         define_method(klass, cstr(b"native_id\0"), viewport_native_id, 0);
     }
     Ok(())

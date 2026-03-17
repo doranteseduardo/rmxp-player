@@ -1,3 +1,4 @@
+use crate::fs;
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use rb_sys::{rb_define_module, rb_define_module_under, rb_utf8_str_new, VALUE};
@@ -90,15 +91,10 @@ pub fn save_dir() -> Option<&'static PathBuf> {
 }
 
 pub fn resolve_project_path(relative: &str) -> Option<PathBuf> {
-    if relative.is_empty() {
+    if relative.trim().is_empty() {
         return project_root().cloned();
     }
-    let path = Path::new(relative);
-    if path.is_absolute() {
-        Some(path.to_path_buf())
-    } else {
-        project_root().map(|root| root.join(path))
-    }
+    fs::resolve(relative)
 }
 
 unsafe fn define_native_functions(module: VALUE) -> Result<()> {
@@ -120,10 +116,10 @@ unsafe fn define_native_functions(module: VALUE) -> Result<()> {
 
 unsafe extern "C" fn native_project_path(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     if argc <= 0 || argv.is_null() {
-        if let Some(root) = project_root() {
-            return path_to_value(root);
-        }
-        return rb_sys::Qnil as VALUE;
+        return match fs::data_root().or_else(|| project_root().cloned()) {
+            Some(root) => path_to_value(&root),
+            None => rb_sys::Qnil as VALUE,
+        };
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
     let mut value = args[0];
@@ -132,7 +128,7 @@ unsafe extern "C" fn native_project_path(argc: c_int, argv: *const VALUE, _self:
         return rb_sys::Qnil as VALUE;
     }
     let text = CStr::from_ptr(ptr).to_string_lossy();
-    match resolve_project_path(text.trim()) {
+    match fs::resolve(text.trim()).or_else(|| resolve_project_path(text.trim())) {
         Some(path) => path_to_value(&path),
         None => rb_sys::Qnil as VALUE,
     }

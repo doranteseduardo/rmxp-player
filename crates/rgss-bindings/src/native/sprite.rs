@@ -62,6 +62,16 @@ pub struct SpriteData {
     pub color: ColorData,
     pub tone: ToneData,
     pub disposed: bool,
+    pub flash: Option<SpriteFlashState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SpriteFlashState {
+    pub color: ColorData,
+    alpha: f32,
+    duration: i32,
+    counter: i32,
+    pub empty: bool,
 }
 
 impl Default for SpriteData {
@@ -87,6 +97,7 @@ impl Default for SpriteData {
             color: ColorData::default(),
             tone: ToneData::default(),
             disposed: false,
+            flash: None,
         }
     }
 }
@@ -222,6 +233,44 @@ pub fn set_color(id: u32, color: ColorData) {
 pub fn set_tone(id: u32, tone: ToneData) {
     SPRITES.with_mut(id, |sprite| {
         sprite.tone = tone;
+    });
+}
+
+pub fn start_flash(id: u32, color: Option<ColorData>, duration: i32) {
+    if duration < 1 {
+        return;
+    }
+    SPRITES.with_mut(id, |sprite| {
+        let (color_data, alpha, empty) = match color {
+            Some(c) => (c, c.alpha, false),
+            None => (ColorData::default(), 0.0, true),
+        };
+        let state = SpriteFlashState {
+            color: color_data,
+            alpha,
+            duration,
+            counter: 0,
+            empty,
+        };
+        sprite.flash = Some(state);
+    });
+}
+
+pub fn advance_flash(id: u32) {
+    SPRITES.with_mut(id, |sprite| {
+        if let Some(flash) = sprite.flash.as_mut() {
+            flash.counter += 1;
+            if flash.counter > flash.duration {
+                sprite.flash = None;
+                return;
+            }
+            if flash.empty {
+                return;
+            }
+            let progress = flash.counter as f32 / flash.duration.max(1) as f32;
+            let remaining = flash.alpha * (1.0 - progress);
+            flash.color.alpha = remaining.max(0.0);
+        }
     });
 }
 

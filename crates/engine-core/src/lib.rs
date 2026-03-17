@@ -8,9 +8,10 @@ use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
 use rgss_bindings::{
-    install_window_hooks, native_snapshot, set_config_dir as rgss_set_config_dir, set_game_title,
-    set_platform_info, set_project_root, set_save_dir as rgss_set_save_dir, sync_graphics_size,
-    update_frame_delta, update_input, PlatformInfo, RubyVm, ScriptSection, WindowHooks,
+    install_window_hooks, native_snapshot, request_hangup, set_config_dir as rgss_set_config_dir,
+    set_game_title, set_platform_info, set_project_root, set_save_dir as rgss_set_save_dir,
+    sync_graphics_size, update_frame_delta, update_input, PlatformInfo, RubyVm, ScriptSection,
+    WindowHooks,
 };
 use rmxp_data::{MapData, SystemData};
 use std::{
@@ -21,8 +22,9 @@ use std::{
 use tracing::{info, warn};
 use winit::{
     dpi::{LogicalSize, PhysicalPosition},
-    event::{Event, WindowEvent},
+    event::{ElementState, Event, Ime, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    keyboard::{Key, NamedKey},
     window::{Fullscreen, WindowBuilder},
 };
 use winit_input_helper::WinitInputHelper;
@@ -177,25 +179,42 @@ pub fn run(config: AppConfig) -> Result<()> {
     let mut accumulator = Duration::ZERO;
     let mut last_tick = Instant::now();
     let mut frame_index: u64 = 0;
+    let mut exit_requested = false;
+    let mut had_main_loop = ruby_vm.has_main_loop();
 
     event_loop.run(move |event, target| {
         let window_ref = unsafe { &*window_ptr };
         if input.update(&event) {
             input_state.update_from_helper(&input);
             if input.close_requested() || input.destroyed() {
-                target.exit();
-                return;
+                request_hangup();
+                exit_requested = true;
             }
         }
 
         match event {
             Event::WindowEvent { window_id, event } if window_id == window_ref.id() => {
                 match event {
+                    WindowEvent::Ime(Ime::Commit(text)) => {
+                        for ch in text.chars() {
+                            input_state.push_text_char(ch);
+                        }
+                    }
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if event.state == ElementState::Pressed {
+                            if let Key::Named(NamedKey::Backspace) = event.logical_key {
+                                input_state.push_backspace();
+                            }
+                        }
+                    }
                     WindowEvent::Resized(size) => renderer.resize(size),
                     WindowEvent::ScaleFactorChanged { .. } => {
                         renderer.resize(window_ref.inner_size())
                     }
-                    WindowEvent::CloseRequested => target.exit(),
+                    WindowEvent::CloseRequested => {
+                        request_hangup();
+                        exit_requested = true;
+                    }
                     WindowEvent::RedrawRequested => {
                         if let Err(err) = renderer.render(frame_index, game.render_frame()) {
                             warn!(target: "render", error = %err, "render error, exiting");
@@ -215,8 +234,25 @@ pub fn run(config: AppConfig) -> Result<()> {
                 accumulator += delta;
                 while accumulator >= FIXED_TIMESTEP {
                     update_input(input_state.snapshot());
-                    if let Err(err) = ruby_vm.resume_main_loop() {
-                        warn!(target: "rgss", error = %err, "Ruby main loop error; stopping updates");
+                    match ruby_vm.resume_main_loop() {
+                        Ok(true) => {
+                            had_main_loop = true;
+                        }
+                        Ok(false) => {
+                            if exit_requested || had_main_loop {
+                                target.exit();
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "rgss",
+                                error = %err,
+                                "Ruby main loop error; stopping updates"
+                            );
+                            target.exit();
+                            return;
+                        }
                     }
                     game.update(FIXED_TIMESTEP, &input_state);
                     accumulator -= FIXED_TIMESTEP;

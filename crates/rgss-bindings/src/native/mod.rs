@@ -26,7 +26,7 @@ pub fn init() -> Result<()> {
 pub use bitmap::{create_from_texture, snapshot as bitmap_snapshot, BitmapData};
 pub(crate) use handles::HandleStore;
 pub use module::{config_dir, save_dir, set_config_dir, set_save_dir};
-pub(crate) use module::{native_module, project_root, set_project_root};
+pub(crate) use module::{native_module, set_project_root};
 pub use plane::{snapshot as plane_snapshot, PlaneData};
 pub use sprite::{snapshot as sprite_snapshot, SpriteData};
 pub use tilemap::{snapshot as tilemap_snapshot, TilemapData};

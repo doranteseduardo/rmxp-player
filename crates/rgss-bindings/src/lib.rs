@@ -1,6 +1,7 @@
 //! Embedded Ruby (MRI) host for RGSS scripts.
 
 mod classes;
+mod fs;
 mod graphics;
 mod input;
 mod kernel;
@@ -26,8 +27,10 @@ use tracing::{debug, info, warn};
 static RUBY_INIT: OnceCell<()> = OnceCell::new();
 
 pub use input::{
-    update_input, InputSnapshot, BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_DOWN, BUTTON_L, BUTTON_LEFT,
-    BUTTON_R, BUTTON_RIGHT, BUTTON_UP, BUTTON_X, BUTTON_Y, BUTTON_Z,
+    update_input, InputSnapshot, TextEvent, BUTTON_A, BUTTON_ALT, BUTTON_B, BUTTON_C, BUTTON_CTRL,
+    BUTTON_DOWN, BUTTON_F5, BUTTON_F6, BUTTON_F7, BUTTON_F8, BUTTON_F9, BUTTON_L, BUTTON_LEFT,
+    BUTTON_MOUSE_LEFT, BUTTON_MOUSE_MIDDLE, BUTTON_MOUSE_RIGHT, BUTTON_MOUSE_X1, BUTTON_MOUSE_X2,
+    BUTTON_R, BUTTON_RIGHT, BUTTON_SHIFT, BUTTON_UP, BUTTON_X, BUTTON_Y, BUTTON_Z,
 };
 pub use native::{
     bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, viewport_snapshot,
@@ -40,6 +43,7 @@ pub use system::{
 
 pub fn set_project_root(path: &Path) {
     native::set_project_root(path);
+    fs::set_base_root(path);
 }
 
 pub fn set_config_dir(path: &Path) {
@@ -54,7 +58,7 @@ pub fn sync_graphics_size(width: u32, height: u32) {
     graphics::set_screen_size(width, height);
 }
 
-pub use graphics::{screen_effects, store_backbuffer, ScreenEffects};
+pub use graphics::{request_hangup, screen_effects, store_backbuffer, ScreenEffects};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NativeSnapshot {

@@ -76,14 +76,14 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_INITIALIZE, tone_initialize, -1);
         define_method(klass, *METHOD_SET, tone_set, -1);
         define_method(klass, *METHOD_RED, tone_get_red, 0);
-        define_method(klass, *METHOD_RED_SET, tone_set_red, 1);
+        define_method(klass, *METHOD_RED_SET, tone_set_red, -1);
         define_method(klass, *METHOD_GREEN, tone_get_green, 0);
-        define_method(klass, *METHOD_GREEN_SET, tone_set_green, 1);
+        define_method(klass, *METHOD_GREEN_SET, tone_set_green, -1);
         define_method(klass, *METHOD_BLUE, tone_get_blue, 0);
-        define_method(klass, *METHOD_BLUE_SET, tone_set_blue, 1);
+        define_method(klass, *METHOD_BLUE_SET, tone_set_blue, -1);
         define_method(klass, *METHOD_GRAY, tone_get_gray, 0);
-        define_method(klass, *METHOD_GRAY_SET, tone_set_gray, 1);
-        define_method(klass, *METHOD_EQUAL, tone_equal, 1);
+        define_method(klass, *METHOD_GRAY_SET, tone_set_gray, -1);
+        define_method(klass, *METHOD_EQUAL, tone_equal, -1);
         define_method(klass, *METHOD_DUP, tone_dup, 0);
         define_method(klass, *METHOD_TO_A, tone_to_a, 0);
     }

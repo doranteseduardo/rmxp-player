@@ -92,45 +92,45 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"dispose\0"), sprite_dispose, 0);
         define_method(klass, cstr(b"disposed?\0"), sprite_disposed_q, 0);
         define_method(klass, cstr(b"viewport\0"), sprite_get_viewport, 0);
-        define_method(klass, cstr(b"viewport=\0"), sprite_set_viewport, 1);
+        define_method(klass, cstr(b"viewport=\0"), sprite_set_viewport, -1);
         define_method(klass, cstr(b"bitmap\0"), sprite_get_bitmap, 0);
-        define_method(klass, cstr(b"bitmap=\0"), sprite_set_bitmap, 1);
+        define_method(klass, cstr(b"bitmap=\0"), sprite_set_bitmap, -1);
         define_method(klass, cstr(b"x\0"), sprite_get_x, 0);
-        define_method(klass, cstr(b"x=\0"), sprite_set_x, 1);
+        define_method(klass, cstr(b"x=\0"), sprite_set_x, -1);
         define_method(klass, cstr(b"y\0"), sprite_get_y, 0);
-        define_method(klass, cstr(b"y=\0"), sprite_set_y, 1);
+        define_method(klass, cstr(b"y=\0"), sprite_set_y, -1);
         define_method(klass, cstr(b"z\0"), sprite_get_z, 0);
-        define_method(klass, cstr(b"z=\0"), sprite_set_z, 1);
+        define_method(klass, cstr(b"z=\0"), sprite_set_z, -1);
         define_method(klass, cstr(b"ox\0"), sprite_get_ox, 0);
-        define_method(klass, cstr(b"ox=\0"), sprite_set_ox, 1);
+        define_method(klass, cstr(b"ox=\0"), sprite_set_ox, -1);
         define_method(klass, cstr(b"oy\0"), sprite_get_oy, 0);
-        define_method(klass, cstr(b"oy=\0"), sprite_set_oy, 1);
+        define_method(klass, cstr(b"oy=\0"), sprite_set_oy, -1);
         define_method(klass, cstr(b"width\0"), sprite_get_width, 0);
         define_method(klass, cstr(b"height\0"), sprite_get_height, 0);
         define_method(klass, cstr(b"zoom_x\0"), sprite_get_zoom_x, 0);
-        define_method(klass, cstr(b"zoom_x=\0"), sprite_set_zoom_x, 1);
+        define_method(klass, cstr(b"zoom_x=\0"), sprite_set_zoom_x, -1);
         define_method(klass, cstr(b"zoom_y\0"), sprite_get_zoom_y, 0);
-        define_method(klass, cstr(b"zoom_y=\0"), sprite_set_zoom_y, 1);
+        define_method(klass, cstr(b"zoom_y=\0"), sprite_set_zoom_y, -1);
         define_method(klass, cstr(b"angle\0"), sprite_get_angle, 0);
-        define_method(klass, cstr(b"angle=\0"), sprite_set_angle, 1);
+        define_method(klass, cstr(b"angle=\0"), sprite_set_angle, -1);
         define_method(klass, cstr(b"mirror\0"), sprite_get_mirror, 0);
-        define_method(klass, cstr(b"mirror=\0"), sprite_set_mirror, 1);
+        define_method(klass, cstr(b"mirror=\0"), sprite_set_mirror, -1);
         define_method(klass, cstr(b"bush_depth\0"), sprite_get_bush_depth, 0);
-        define_method(klass, cstr(b"bush_depth=\0"), sprite_set_bush_depth, 1);
+        define_method(klass, cstr(b"bush_depth=\0"), sprite_set_bush_depth, -1);
         define_method(klass, cstr(b"bush_opacity\0"), sprite_get_bush_opacity, 0);
-        define_method(klass, cstr(b"bush_opacity=\0"), sprite_set_bush_opacity, 1);
+        define_method(klass, cstr(b"bush_opacity=\0"), sprite_set_bush_opacity, -1);
         define_method(klass, cstr(b"opacity\0"), sprite_get_opacity, 0);
-        define_method(klass, cstr(b"opacity=\0"), sprite_set_opacity, 1);
+        define_method(klass, cstr(b"opacity=\0"), sprite_set_opacity, -1);
         define_method(klass, cstr(b"blend_type\0"), sprite_get_blend_type, 0);
-        define_method(klass, cstr(b"blend_type=\0"), sprite_set_blend_type, 1);
+        define_method(klass, cstr(b"blend_type=\0"), sprite_set_blend_type, -1);
         define_method(klass, cstr(b"visible\0"), sprite_get_visible, 0);
-        define_method(klass, cstr(b"visible=\0"), sprite_set_visible, 1);
+        define_method(klass, cstr(b"visible=\0"), sprite_set_visible, -1);
         define_method(klass, cstr(b"src_rect\0"), sprite_get_src_rect, 0);
-        define_method(klass, cstr(b"src_rect=\0"), sprite_set_src_rect, 1);
+        define_method(klass, cstr(b"src_rect=\0"), sprite_set_src_rect, -1);
         define_method(klass, cstr(b"color\0"), sprite_get_color, 0);
-        define_method(klass, cstr(b"color=\0"), sprite_set_color, 1);
+        define_method(klass, cstr(b"color=\0"), sprite_set_color, -1);
         define_method(klass, cstr(b"tone\0"), sprite_get_tone, 0);
-        define_method(klass, cstr(b"tone=\0"), sprite_set_tone, 1);
+        define_method(klass, cstr(b"tone=\0"), sprite_set_tone, -1);
         define_method(klass, cstr(b"flash\0"), sprite_flash, -1);
         define_method(klass, cstr(b"update\0"), sprite_update, 0);
         define_method(klass, cstr(b"native_id\0"), sprite_native_id, 0);
@@ -498,12 +498,42 @@ unsafe extern "C" fn sprite_set_tone(_argc: c_int, argv: *const VALUE, self_valu
     value
 }
 
-unsafe extern "C" fn sprite_flash(_argc: c_int, _argv: *const VALUE, _self_value: VALUE) -> VALUE {
-    warn!(target: "rgss", "Sprite#flash is not implemented yet");
+unsafe extern "C" fn sprite_flash(argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let args = slice_from(argc, argv);
+    if args.is_empty() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let sprite = get_sprite(self_value);
+    if sprite.disposed {
+        return rb_sys::Qnil as VALUE;
+    }
+    let duration = if args.len() >= 2 {
+        value_to_i32(args[1])
+    } else {
+        0
+    };
+    if duration < 1 {
+        return rb_sys::Qnil as VALUE;
+    }
+    let color_value = args[0];
+    if color_value == rb_sys::Qnil as VALUE {
+        native::sprite::start_flash(sprite.handle, None, duration);
+        return rb_sys::Qnil as VALUE;
+    }
+    if !is_color(color_value) {
+        warn!(target: "rgss", "Sprite#flash expected Color or nil");
+        return rb_sys::Qnil as VALUE;
+    }
+    native::sprite::start_flash(sprite.handle, Some(get_color_data(color_value)), duration);
     rb_sys::Qnil as VALUE
 }
 
-unsafe extern "C" fn sprite_update(_argc: c_int, _argv: *const VALUE, _self_value: VALUE) -> VALUE {
+unsafe extern "C" fn sprite_update(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let sprite = get_sprite(self_value);
+    if sprite.disposed {
+        return rb_sys::Qnil as VALUE;
+    }
+    native::sprite::advance_flash(sprite.handle);
     rb_sys::Qnil as VALUE
 }
 

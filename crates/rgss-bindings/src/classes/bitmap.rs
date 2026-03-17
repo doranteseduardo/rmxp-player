@@ -61,7 +61,7 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"width\0"), bitmap_width, 0);
         define_method(klass, cstr(b"height\0"), bitmap_height, 0);
         define_method(klass, cstr(b"rect\0"), bitmap_rect, 0);
-        define_method(klass, cstr(b"hue_change\0"), bitmap_hue_change, 1);
+        define_method(klass, cstr(b"hue_change\0"), bitmap_hue_change, -1);
         define_method(klass, cstr(b"clear\0"), bitmap_clear, 0);
         define_method(klass, cstr(b"fill_rect\0"), bitmap_fill_rect, -1);
         define_method(
@@ -72,18 +72,18 @@ pub fn init() -> Result<()> {
         );
         define_method(klass, cstr(b"blt\0"), bitmap_blt, -1);
         define_method(klass, cstr(b"stretch_blt\0"), bitmap_stretch_blt, -1);
-        define_method(klass, cstr(b"get_pixel\0"), bitmap_get_pixel, 2);
+        define_method(klass, cstr(b"get_pixel\0"), bitmap_get_pixel, -1);
         define_method(klass, cstr(b"set_pixel\0"), bitmap_set_pixel, -1);
-        define_method(klass, cstr(b"text_size\0"), bitmap_text_size, 1);
+        define_method(klass, cstr(b"text_size\0"), bitmap_text_size, -1);
         define_method(klass, cstr(b"draw_text\0"), bitmap_draw_text, -1);
         define_method(klass, cstr(b"dup\0"), bitmap_dup, 0);
         define_method(klass, cstr(b"clone\0"), bitmap_dup, 0);
         define_method(klass, cstr(b"font\0"), bitmap_get_font, 0);
-        define_method(klass, cstr(b"font=\0"), bitmap_set_font, 1);
+        define_method(klass, cstr(b"font=\0"), bitmap_set_font, -1);
 
         define_singleton_method(klass, cstr(b"max_size\0"), bitmap_max_size, 0);
-        define_singleton_method(klass, cstr(b"max_size=\0"), bitmap_set_max_size, 1);
-        define_singleton_method(klass, cstr(b"_native_wrap\0"), bitmap_native_wrap, 1);
+        define_singleton_method(klass, cstr(b"max_size=\0"), bitmap_set_max_size, -1);
+        define_singleton_method(klass, cstr(b"_native_wrap\0"), bitmap_native_wrap, -1);
     }
     Ok(())
 }
@@ -229,10 +229,18 @@ unsafe extern "C" fn bitmap_rect(_argc: c_int, _argv: *const VALUE, self_value: 
 
 unsafe extern "C" fn bitmap_hue_change(
     _argc: c_int,
-    _argv: *const VALUE,
-    _self_value: VALUE,
+    argv: *const VALUE,
+    self_value: VALUE,
 ) -> VALUE {
-    warn!(target: "rgss", "Bitmap#hue_change not implemented");
+    if argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let hue = value_to_i32(*argv);
+    let data = get_bitmap(self_value);
+    if data.disposed || data.handle == 0 {
+        return rb_sys::Qnil as VALUE;
+    }
+    native::bitmap::hue_change(data.handle, hue);
     rb_sys::Qnil as VALUE
 }
 

@@ -1,4 +1,5 @@
 use super::{module, native_module, value_to_bool, ColorData, HandleStore, RectData};
+use crate::fs;
 use anyhow::{Context, Result};
 use font8x8::legacy::BASIC_LEGACY;
 use image::{imageops::FilterType, ImageReader, Rgba, RgbaImage};
@@ -27,6 +28,7 @@ const BITMAP_GRADIENT_FILL_NAME: &[u8] = b"bitmap_gradient_fill_rect\0";
 const BITMAP_STRETCH_BLT_NAME: &[u8] = b"bitmap_stretch_blt\0";
 const BITMAP_DRAW_TEXT_NAME: &[u8] = b"bitmap_draw_text\0";
 const BITMAP_TEXT_SIZE_NAME: &[u8] = b"bitmap_text_size\0";
+const BITMAP_HUE_CHANGE_NAME: &[u8] = b"bitmap_hue_change\0";
 
 static BITMAPS: Lazy<HandleStore<BitmapData>> = Lazy::new(HandleStore::default);
 
@@ -306,6 +308,37 @@ fn bitmap_texture(id: u32) -> Option<Arc<RgbaImage>> {
         .flatten()
 }
 
+pub fn hue_change(id: u32, hue: i32) {
+    let hue = normalize_hue(hue);
+    if hue.abs() < f32::EPSILON {
+        return;
+    }
+    let _ = with_bitmap_mut(id, |image| {
+        for pixel in image.pixels_mut() {
+            if pixel[3] == 0 {
+                continue;
+            }
+            let (r, g, b) = (
+                pixel[0] as f32 / 255.0,
+                pixel[1] as f32 / 255.0,
+                pixel[2] as f32 / 255.0,
+            );
+            let (mut h, s, v) = rgb_to_hsv(r, g, b);
+            h += hue;
+            while h < 0.0 {
+                h += 360.0;
+            }
+            while h >= 360.0 {
+                h -= 360.0;
+            }
+            let (nr, ng, nb) = hsv_to_rgb(h, s, v);
+            pixel[0] = (nr * 255.0).round().clamp(0.0, 255.0) as u8;
+            pixel[1] = (ng * 255.0).round().clamp(0.0, 255.0) as u8;
+            pixel[2] = (nb * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    });
+}
+
 unsafe fn define_bitmap_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(BITMAP_CREATE_NAME), Some(bitmap_create), 2);
@@ -361,6 +394,12 @@ unsafe fn define_bitmap_api() -> Result<()> {
         native,
         c_name(BITMAP_TEXT_SIZE_NAME),
         Some(bitmap_text_size),
+        2,
+    );
+    rb_define_module_function(
+        native,
+        c_name(BITMAP_HUE_CHANGE_NAME),
+        Some(bitmap_hue_change),
         2,
     );
     Ok(())
@@ -470,19 +509,16 @@ fn store_bitmap_data(data: BitmapData) -> u32 {
 }
 
 fn load_bitmap_from_project(relative: &str) -> Result<u32> {
-    let root = module::project_root().ok_or_else(|| anyhow::anyhow!("project root not set"))?;
     let candidates = candidate_paths(relative);
     for candidate in candidates {
-        let path = if candidate.is_absolute() {
-            candidate
-        } else {
-            root.join(&candidate)
-        };
-        if path.exists() {
+        if let Some(path) = resolve_candidate(&candidate) {
             return load_bitmap_from_file(&path);
         }
     }
-    anyhow::bail!("{} not found under {}", relative, root.display())
+    let base = module::project_root()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<unknown>".into());
+    anyhow::bail!("{} not found under {}", relative, base)
 }
 
 fn candidate_paths(relative: &str) -> Vec<PathBuf> {
@@ -494,6 +530,13 @@ fn candidate_paths(relative: &str) -> Vec<PathBuf> {
         paths.push(base.with_extension("PNG"));
     }
     paths
+}
+
+fn resolve_candidate(candidate: &Path) -> Option<PathBuf> {
+    if candidate.is_absolute() {
+        return candidate.exists().then(|| candidate.to_path_buf());
+    }
+    fs::resolve(candidate)
 }
 
 fn load_bitmap_from_file(path: &Path) -> Result<u32> {
@@ -1047,4 +1090,66 @@ fn draw_char(
             }
         }
     }
+}
+
+fn normalize_hue(hue: i32) -> f32 {
+    let mut value = hue % 360;
+    if value < 0 {
+        value += 360;
+    }
+    value as f32
+}
+
+fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let mut h = 0.0;
+    if delta > 0.0 {
+        if (max - r).abs() < f32::EPSILON {
+            h = 60.0 * ((g - b) / delta).rem_euclid(6.0);
+        } else if (max - g).abs() < f32::EPSILON {
+            h = 60.0 * (((b - r) / delta) + 2.0);
+        } else {
+            h = 60.0 * (((r - g) / delta) + 4.0);
+        }
+    }
+    if h < 0.0 {
+        h += 360.0;
+    }
+
+    let s = if max <= 0.0 { 0.0 } else { delta / max };
+    let v = max;
+    (h, s, v)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    if s <= 0.0 {
+        return (v, v, v);
+    }
+    let h_sector = h / 60.0;
+    let i = h_sector.floor();
+    let f = h_sector - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match (i as i32) % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+unsafe extern "C" fn bitmap_hue_change(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 2 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, 2);
+    let id = rb_num2uint(args[0]) as u32;
+    let hue = rb_num2int(args[1]) as i32;
+    hue_change(id, hue);
+    rb_sys::Qnil as VALUE
 }

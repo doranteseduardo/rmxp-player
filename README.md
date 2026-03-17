@@ -35,10 +35,22 @@ and mobile targets.
   and windows are mirrored from Ruby handle stores when available.
 - **Ruby Embedding** – MRI 3.2 boots in-process, evaluates real `Scripts.rxdata`
   sections, and bridges to native handles (System/Graphics/Bitmap/etc.).
-- **Graphics Built-ins (In Progress)** – Most RGSS built-in classes exist as
-  native bindings, but several methods still defer to Ruby shims. Work is under
-  way to move every class (Color/Tone/Rect/Table/Font plus Bitmap→Tilemap) into
-  Rust so behavior exactly matches mkxp-z.
+- **Graphics Built-ins** – All RGSS built-in classes now run as native typed
+  data. `Bitmap#hue_change`, `Bitmap#stretch_blt`, `Bitmap#draw_text`, and
+  `Sprite#flash` all drive the renderer directly, so scripts no longer depend on
+  Ruby fallbacks for visual effects. Screen-level `Graphics.blur`/`sharpen`
+  now run through the renderer’s CPU post-process pipeline (or directly on the
+  frozen frame), matching mkxp-z transitions.
+- **Lifecycle Hooks** – Window close/destroy events trigger the RGSS `Hangup`
+  exception instead of aborting the process, giving scripts a chance to intercept
+  shutdown just like in mkxp-z.
+- **System Utilities** – Platform detection (`System.platform`, `System.is_*?`),
+  CPU/memory stats, CSV parsing, launcher helpers, and file probes are wired up,
+  so scripts that rely on mkxp-z’s extended `System` module continue to run.
+- **Input Parity** – `Input.release?`, `Input.count`, `Input.time?`, mouse
+  coordinates, scroll deltas, text input, clipboard access, and the controller
+  namespace are all available, feeding the same handle store the renderer sees
+  instead of being patched in Ruby.
 - **Diagnostics** – `tracing` logs project resolution, data parsing, renderer
   state, and Ruby evaluation status with `RMXP_LOG=debug`.
 
@@ -48,11 +60,11 @@ and mobile targets.
 
 1. **RGSS Built-ins 1:1** – Finish migrating the remaining value/resource
    classes to native handles, remove the stop-gap Ruby implementations, and
-   audit method-by-method parity (hue changes, tone ranges, window cursors,
-   tilemap priorities, disposed? semantics, etc.).
-2. **System/Input Glue** – Essentials currently bails on
-   `System.data_directory`, `Input::X/Y/Z`, and Hangup handling. These APIs need
-   to match mkxp-z before most projects can boot.
+   audit method-by-method parity (tone ranges, window cursors, tilemap
+   priorities, disposed? semantics, blur/sharpen, etc.).
+2. **System/Input Glue** – Essentials still expects a few more `System.*`
+   helpers plus complete input/device mappings. These APIs need to match mkxp-z
+   before most projects can boot.
 3. **Scene Loop & Interpreter** – Game_Map/Game_Player/Game_Interpreter wiring
    still needs to hand control to Ruby so player movement, events, and menus run
    end-to-end.
@@ -145,8 +157,8 @@ Additional notes:
 3. **Globals & Input** – Finish `System.*` helpers, Input constants, and Hangup
    integration required by Pokémon Essentials and other projects.
 4. **Behavior Audit + Tests** – Method-by-method comparisons against mkxp-z
-   (hue_change, blur/sharpen, window cursors, tone clamps, tilemap priorities)
-   plus snapshot tests to prevent regressions.
+   (blur/sharpen, window cursors, tone clamps, tilemap priorities) plus snapshot
+   tests to prevent regressions.
 5. **Audio / Interpreter / Persistence** – Once RGSS surfaces are 1:1, move on
    to Audio playback, scene/interpreter flow, save/config handling, and mobile
    shells.

@@ -138,6 +138,8 @@ pub struct SpriteInstance {
     pub bush_depth: u32,
     pub bush_opacity: u8,
     pub clip: ClipRect,
+    pub flash_color: Option<[f32; 4]>,
+    pub flash_empty: bool,
 }
 
 #[derive(Clone)]
@@ -311,7 +313,13 @@ impl TileScene {
 
 impl<'a> Renderer<'a> {
     pub fn new(window: &'a Window, logical_width: u32, logical_height: u32) -> Result<Self> {
-        let size = window.inner_size();
+        let mut size = window.inner_size();
+        if size.width == 0 {
+            size.width = 1;
+        }
+        if size.height == 0 {
+            size.height = 1;
+        }
         let surface = SurfaceTexture::new(size.width, size.height, window);
         let pixels = Pixels::new(logical_width, logical_height, surface)?;
         Ok(Self {
@@ -701,6 +709,9 @@ fn draw_sprite(size: (u32, u32), frame: &mut [u8], sprite: &SpriteInstance) {
     if sprite.opacity == 0 {
         return;
     }
+    if sprite.flash_empty {
+        return;
+    }
     let Some(clip) = sprite.clip.clamp(size) else {
         return;
     };
@@ -775,7 +786,13 @@ fn draw_sprite(size: (u32, u32), frame: &mut [u8], sprite: &SpriteInstance) {
                     color[3] = ((color[3] as u16 * sprite.bush_opacity as u16) / 255) as u8;
                 }
             }
-            color = apply_tone_and_color(color, &sprite.tone, &sprite.color);
+            let mut overlay = sprite.color;
+            if let Some(flash) = sprite.flash_color {
+                if flash[3] > overlay[3] {
+                    overlay = flash;
+                }
+            }
+            color = apply_tone_and_color(color, &sprite.tone, &overlay);
             let idx = (dest_y as usize * size.0 as usize + dest_x as usize) * 4;
             let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];
             blend_with_mode(&mut dst, color, sprite.blend_type);
@@ -1294,7 +1311,14 @@ fn capture_backbuffer(size: (u32, u32), frame: &[u8]) {
     }
 }
 
-fn apply_screen_effects(_size: (u32, u32), frame: &mut [u8], effects: &ScreenEffects) {
+fn apply_screen_effects(size: (u32, u32), frame: &mut [u8], effects: &ScreenEffects) {
+    if effects.blur {
+        apply_filter(size, frame, FilterKind::Blur);
+    }
+    if effects.sharpen {
+        apply_filter(size, frame, FilterKind::Sharpen);
+    }
+
     let mut apply_tone = false;
     for value in effects.tone.iter() {
         if value.abs() > f32::EPSILON {
@@ -1342,6 +1366,56 @@ fn apply_screen_effects(_size: (u32, u32), frame: &mut [u8], effects: &ScreenEff
             blend_pixel(&mut dst, color);
             pixel[0..3].copy_from_slice(&dst[0..3]);
             pixel[3] = dst[3];
+        }
+    }
+}
+
+enum FilterKind {
+    Blur,
+    Sharpen,
+}
+
+fn apply_filter(size: (u32, u32), frame: &mut [u8], kind: FilterKind) {
+    let (width, height) = size;
+    if width == 0 || height == 0 {
+        return;
+    }
+    let kernel: [f32; 9] = match kind {
+        FilterKind::Blur => [
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+        ],
+        FilterKind::Sharpen => [0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0],
+    };
+    let source = frame.to_vec();
+    let width_i = width as i32;
+    let height_i = height as i32;
+    for y in 0..height_i {
+        for x in 0..width_i {
+            let mut accum = [0.0f32; 3];
+            for ky in -1..=1 {
+                for kx in -1..=1 {
+                    let sample_x = (x + kx).clamp(0, width_i - 1) as u32;
+                    let sample_y = (y + ky).clamp(0, height_i - 1) as u32;
+                    let idx = ((sample_y * width + sample_x) * 4) as usize;
+                    let weight = kernel[((ky + 1) * 3 + (kx + 1)) as usize];
+                    for channel in 0..3 {
+                        accum[channel] += source[idx + channel] as f32 * weight;
+                    }
+                }
+            }
+            let dst_idx = ((y as u32 * width + x as u32) * 4) as usize;
+            for channel in 0..3 {
+                frame[dst_idx + channel] = accum[channel].clamp(0.0, 255.0).round() as u8;
+            }
+            frame[dst_idx + 3] = source[dst_idx + 3];
         }
     }
 }

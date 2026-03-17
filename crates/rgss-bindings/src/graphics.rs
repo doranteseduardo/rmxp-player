@@ -3,11 +3,12 @@ use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use once_cell::sync::{Lazy, OnceCell};
 use rb_sys::{
-    rb_ary_new, rb_ary_push, rb_define_module, rb_float_new, rb_int2big, rb_num2long,
-    ruby_special_consts, special_consts, VALUE,
+    rb_ary_new, rb_ary_push, rb_cObject, rb_const_get, rb_define_module, rb_eRuntimeError,
+    rb_float_new, rb_int2big, rb_intern, rb_num2long, rb_raise, ruby_special_consts,
+    special_consts, VALUE,
 };
 use std::{
-    ffi::CStr,
+    ffi::{CStr, CString},
     os::raw::{c_char, c_int},
     path::Path,
     sync::{
@@ -27,6 +28,8 @@ static LAST_FRAME: Lazy<RwLock<Option<Arc<RgbaImage>>>> = Lazy::new(|| RwLock::n
 static FROZEN_FRAME: Lazy<RwLock<Option<Arc<RgbaImage>>>> = Lazy::new(|| RwLock::new(None));
 static SCREEN_TONE: Lazy<RwLock<ToneState>> = Lazy::new(|| RwLock::new(ToneState::default()));
 static BRIGHTNESS: AtomicI32 = AtomicI32::new(255);
+static BLUR_REQUEST: AtomicBool = AtomicBool::new(false);
+static SHARPEN_REQUEST: AtomicBool = AtomicBool::new(false);
 static FLASH_STATE: Lazy<RwLock<Option<FlashState>>> = Lazy::new(|| RwLock::new(None));
 static FADE_STATE: Lazy<RwLock<Option<FadeState>>> = Lazy::new(|| RwLock::new(None));
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
@@ -38,6 +41,11 @@ static SMOOTH_SCALING: AtomicI32 = AtomicI32::new(0);
 static INTEGER_SCALING: AtomicBool = AtomicBool::new(false);
 static LAST_MILE_SCALING: AtomicBool = AtomicBool::new(false);
 static THREAD_SAFE: AtomicBool = AtomicBool::new(false);
+
+static HANGUP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static HANGUP_CLASS: OnceCell<VALUE> = OnceCell::new();
+static HANGUP_MESSAGE: Lazy<CString> =
+    Lazy::new(|| CString::new("window closed").expect("CString literal"));
 
 const GRAPHICS_NAME: &[u8] = b"Graphics\0";
 const UPDATE_NAME: &[u8] = b"update\0";
@@ -65,6 +73,8 @@ const DISPLAY_WIDTH_NAME: &[u8] = b"display_width\0";
 const DISPLAY_HEIGHT_NAME: &[u8] = b"display_height\0";
 const CENTER_NAME: &[u8] = b"center\0";
 const RESIZE_WINDOW_NAME: &[u8] = b"resize_window\0";
+const BLUR_NAME: &[u8] = b"blur\0";
+const SHARPEN_NAME: &[u8] = b"sharpen\0";
 const DELTA_NAME: &[u8] = b"delta\0";
 const AVERAGE_FRAME_RATE_NAME: &[u8] = b"average_frame_rate\0";
 const FULLSCREEN_NAME: &[u8] = b"fullscreen\0";
@@ -142,6 +152,10 @@ pub fn init() -> Result<()> {
     GRAPHICS_MODULE
         .get_or_try_init(|| unsafe { define_graphics() })
         .map(|_| ())
+}
+
+pub fn request_hangup() {
+    HANGUP_REQUESTED.store(true, Ordering::SeqCst);
 }
 
 #[allow(dead_code)]
@@ -261,6 +275,8 @@ unsafe fn define_graphics() -> Result<()> {
         Some(graphics_resize_window),
         2,
     );
+    rb_define_module_function(module, c_name(BLUR_NAME), Some(graphics_blur), 0);
+    rb_define_module_function(module, c_name(SHARPEN_NAME), Some(graphics_sharpen), 0);
     rb_define_module_function(
         module,
         c_name(AVERAGE_FRAME_RATE_NAME),
@@ -369,6 +385,9 @@ unsafe fn define_graphics() -> Result<()> {
 }
 
 unsafe extern "C" fn graphics_update(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    if HANGUP_REQUESTED.swap(false, Ordering::SeqCst) {
+        raise_hangup();
+    }
     if let Err(err) = runtime::yield_frame() {
         warn!(target: "rgss", error = %err, "Graphics.update yield failed");
     }
@@ -515,6 +534,20 @@ unsafe extern "C" fn graphics_resize_window(
     graphics_resize_screen(argc, argv, _self)
 }
 
+unsafe extern "C" fn graphics_blur(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    if !apply_filter_to_frozen(ScreenFilter::Blur) {
+        BLUR_REQUEST.store(true, Ordering::SeqCst);
+    }
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn graphics_sharpen(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    if !apply_filter_to_frozen(ScreenFilter::Sharpen) {
+        SHARPEN_REQUEST.store(true, Ordering::SeqCst);
+    }
+    rb_sys::Qnil as VALUE
+}
+
 fn int_to_value(value: i64) -> VALUE {
     unsafe {
         if value >= special_consts::FIXNUM_MIN as i64 && value <= special_consts::FIXNUM_MAX as i64
@@ -529,6 +562,83 @@ fn int_to_value(value: i64) -> VALUE {
 
 fn c_name(bytes: &[u8]) -> *const c_char {
     bytes.as_ptr() as *const c_char
+}
+
+#[derive(Clone, Copy)]
+enum ScreenFilter {
+    Blur,
+    Sharpen,
+}
+
+fn apply_filter_to_frozen(kind: ScreenFilter) -> bool {
+    if !SCREEN_FROZEN.load(Ordering::Relaxed) {
+        return false;
+    }
+    if let Ok(mut slot) = FROZEN_FRAME.write() {
+        if let Some(frame) = slot.as_ref() {
+            if let Some(filtered) = filter_image(frame, kind) {
+                *slot = Some(Arc::new(filtered));
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn filter_image(image: &RgbaImage, kind: ScreenFilter) -> Option<RgbaImage> {
+    let mut data = image.clone().into_vec();
+    let size = (image.width(), image.height());
+    apply_filter_kernel(size, &mut data, kind);
+    RgbaImage::from_raw(size.0, size.1, data)
+}
+
+fn apply_filter_kernel(size: (u32, u32), data: &mut [u8], kind: ScreenFilter) {
+    let kernel = match kind {
+        ScreenFilter::Blur => [
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+            1.0 / 9.0,
+        ],
+        ScreenFilter::Sharpen => [0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0],
+    };
+    convolve(size, data, &kernel);
+}
+
+fn convolve(size: (u32, u32), data: &mut [u8], kernel: &[f32; 9]) {
+    let (width, height) = size;
+    if width == 0 || height == 0 {
+        return;
+    }
+    let source = data.to_vec();
+    let width_i = width as i32;
+    let height_i = height as i32;
+    for y in 0..height_i {
+        for x in 0..width_i {
+            let mut accum = [0.0f32; 3];
+            for ky in -1..=1 {
+                for kx in -1..=1 {
+                    let sample_x = (x + kx).clamp(0, width_i - 1) as u32;
+                    let sample_y = (y + ky).clamp(0, height_i - 1) as u32;
+                    let idx = ((sample_y * width + sample_x) * 4) as usize;
+                    let weight = kernel[((ky + 1) * 3 + (kx + 1)) as usize];
+                    for channel in 0..3 {
+                        accum[channel] += source[idx + channel] as f32 * weight;
+                    }
+                }
+            }
+            let dst_idx = ((y as u32 * width + x as u32) * 4) as usize;
+            for channel in 0..3 {
+                data[dst_idx + channel] = accum[channel].clamp(0.0, 255.0).round() as u8;
+            }
+            data[dst_idx + 3] = source[dst_idx + 3];
+        }
+    }
 }
 
 pub fn store_backbuffer(image: Arc<RgbaImage>) {
@@ -549,6 +659,8 @@ pub struct ScreenEffects {
     pub tone: [f32; 4],
     pub brightness: f32,
     pub flash: Option<[f32; 4]>,
+    pub blur: bool,
+    pub sharpen: bool,
 }
 
 pub fn screen_effects() -> ScreenEffects {
@@ -559,10 +671,14 @@ pub fn screen_effects() -> ScreenEffects {
         .unwrap_or_else(ToneState::default);
     let brightness = (BRIGHTNESS.load(Ordering::Relaxed).clamp(0, 255) as f32) / 255.0;
     let flash = current_flash();
+    let blur = BLUR_REQUEST.swap(false, Ordering::SeqCst);
+    let sharpen = SHARPEN_REQUEST.swap(false, Ordering::SeqCst);
     ScreenEffects {
         tone: tone_state.as_array(),
         brightness,
         flash,
+        blur,
+        sharpen,
     }
 }
 
@@ -999,4 +1115,25 @@ fn bool_to_value(value: bool) -> VALUE {
 
 fn value_to_bool(value: VALUE) -> bool {
     value != rb_sys::Qfalse as VALUE && value != rb_sys::Qnil as VALUE
+}
+
+#[allow(unreachable_code)]
+fn raise_hangup() -> ! {
+    unsafe {
+        rb_raise(hangup_class(), HANGUP_MESSAGE.as_ptr());
+        std::hint::unreachable_unchecked();
+    }
+}
+
+fn hangup_class() -> VALUE {
+    *HANGUP_CLASS.get_or_init(|| unsafe {
+        let name = CString::new("Hangup").expect("CString literal");
+        let id = rb_intern(name.as_ptr());
+        let class = rb_const_get(rb_cObject, id);
+        if class == 0 {
+            rb_eRuntimeError
+        } else {
+            class
+        }
+    })
 }

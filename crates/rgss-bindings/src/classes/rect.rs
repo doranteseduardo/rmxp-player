@@ -78,16 +78,16 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_INITIALIZE, rect_initialize, -1);
         define_method(klass, *METHOD_SET, rect_set, -1);
         define_method(klass, *METHOD_X, rect_get_x, 0);
-        define_method(klass, *METHOD_X_SET, rect_set_x, 1);
+        define_method(klass, *METHOD_X_SET, rect_set_x, -1);
         define_method(klass, *METHOD_Y, rect_get_y, 0);
-        define_method(klass, *METHOD_Y_SET, rect_set_y, 1);
+        define_method(klass, *METHOD_Y_SET, rect_set_y, -1);
         define_method(klass, *METHOD_WIDTH, rect_get_width, 0);
-        define_method(klass, *METHOD_WIDTH_SET, rect_set_width, 1);
+        define_method(klass, *METHOD_WIDTH_SET, rect_set_width, -1);
         define_method(klass, *METHOD_HEIGHT, rect_get_height, 0);
-        define_method(klass, *METHOD_HEIGHT_SET, rect_set_height, 1);
+        define_method(klass, *METHOD_HEIGHT_SET, rect_set_height, -1);
         define_method(klass, *METHOD_EMPTY, rect_empty, 0);
         define_method(klass, *METHOD_DUP, rect_dup, 0);
-        define_method(klass, *METHOD_EQUAL, rect_equal, 1);
+        define_method(klass, *METHOD_EQUAL, rect_equal, -1);
         define_method(klass, *METHOD_TO_A, rect_to_a, 0);
     }
     Ok(())

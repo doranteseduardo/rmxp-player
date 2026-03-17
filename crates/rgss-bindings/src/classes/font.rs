@@ -95,24 +95,24 @@ pub fn init() -> Result<()> {
         install_allocator(klass, Some(font_allocate));
         define_method(klass, cstr(b"initialize\0"), font_initialize, -1);
         define_method(klass, cstr(b"name\0"), font_get_name, 0);
-        define_method(klass, cstr(b"name=\0"), font_set_name, 1);
+        define_method(klass, cstr(b"name=\0"), font_set_name, -1);
         define_method(klass, cstr(b"size\0"), font_get_size, 0);
-        define_method(klass, cstr(b"size=\0"), font_set_size, 1);
+        define_method(klass, cstr(b"size=\0"), font_set_size, -1);
         define_method(klass, cstr(b"bold\0"), font_get_bold, 0);
-        define_method(klass, cstr(b"bold=\0"), font_set_bold, 1);
+        define_method(klass, cstr(b"bold=\0"), font_set_bold, -1);
         define_method(klass, cstr(b"italic\0"), font_get_italic, 0);
-        define_method(klass, cstr(b"italic=\0"), font_set_italic, 1);
+        define_method(klass, cstr(b"italic=\0"), font_set_italic, -1);
         define_method(klass, cstr(b"shadow\0"), font_get_shadow, 0);
-        define_method(klass, cstr(b"shadow=\0"), font_set_shadow, 1);
+        define_method(klass, cstr(b"shadow=\0"), font_set_shadow, -1);
         define_method(klass, cstr(b"color\0"), font_get_color, 0);
-        define_method(klass, cstr(b"color=\0"), font_set_color, 1);
+        define_method(klass, cstr(b"color=\0"), font_set_color, -1);
 
         define_singleton_method(klass, cstr(b"default_name\0"), font_default_name, 0);
-        define_singleton_method(klass, cstr(b"default_name=\0"), font_set_default_name, 1);
+        define_singleton_method(klass, cstr(b"default_name=\0"), font_set_default_name, -1);
         define_singleton_method(klass, cstr(b"default_size\0"), font_default_size, 0);
-        define_singleton_method(klass, cstr(b"default_size=\0"), font_set_default_size, 1);
+        define_singleton_method(klass, cstr(b"default_size=\0"), font_set_default_size, -1);
         define_singleton_method(klass, cstr(b"default_bold\0"), font_default_bold, 0);
-        define_singleton_method(klass, cstr(b"default_bold=\0"), font_set_default_bold, 1);
+        define_singleton_method(klass, cstr(b"default_bold=\0"), font_set_default_bold, -1);
         define_singleton_method(klass, cstr(b"default_italic\0"), font_default_italic, 0);
         define_singleton_method(
             klass,
@@ -128,7 +128,7 @@ pub fn init() -> Result<()> {
             1,
         );
         define_singleton_method(klass, cstr(b"default_color\0"), font_default_color, 0);
-        define_singleton_method(klass, cstr(b"default_color=\0"), font_set_default_color, 1);
+        define_singleton_method(klass, cstr(b"default_color=\0"), font_set_default_color, -1);
     }
     Ok(())
 }

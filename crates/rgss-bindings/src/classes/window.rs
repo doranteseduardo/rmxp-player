@@ -94,29 +94,29 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"dispose\0"), window_dispose, 0);
         define_method(klass, cstr(b"disposed?\0"), window_disposed_q, 0);
         define_method(klass, cstr(b"viewport\0"), window_get_viewport, 0);
-        define_method(klass, cstr(b"viewport=\0"), window_set_viewport, 1);
+        define_method(klass, cstr(b"viewport=\0"), window_set_viewport, -1);
         define_method(klass, cstr(b"windowskin\0"), window_get_windowskin, 0);
-        define_method(klass, cstr(b"windowskin=\0"), window_set_windowskin, 1);
+        define_method(klass, cstr(b"windowskin=\0"), window_set_windowskin, -1);
         define_method(klass, cstr(b"contents\0"), window_get_contents, 0);
-        define_method(klass, cstr(b"contents=\0"), window_set_contents, 1);
+        define_method(klass, cstr(b"contents=\0"), window_set_contents, -1);
         define_method(klass, cstr(b"x\0"), window_get_x, 0);
-        define_method(klass, cstr(b"x=\0"), window_set_x, 1);
+        define_method(klass, cstr(b"x=\0"), window_set_x, -1);
         define_method(klass, cstr(b"y\0"), window_get_y, 0);
-        define_method(klass, cstr(b"y=\0"), window_set_y, 1);
+        define_method(klass, cstr(b"y=\0"), window_set_y, -1);
         define_method(klass, cstr(b"z\0"), window_get_z, 0);
-        define_method(klass, cstr(b"z=\0"), window_set_z, 1);
+        define_method(klass, cstr(b"z=\0"), window_set_z, -1);
         define_method(klass, cstr(b"width\0"), window_get_width, 0);
-        define_method(klass, cstr(b"width=\0"), window_set_width, 1);
+        define_method(klass, cstr(b"width=\0"), window_set_width, -1);
         define_method(klass, cstr(b"height\0"), window_get_height, 0);
-        define_method(klass, cstr(b"height=\0"), window_set_height, 1);
+        define_method(klass, cstr(b"height=\0"), window_set_height, -1);
         define_method(klass, cstr(b"ox\0"), window_get_ox, 0);
-        define_method(klass, cstr(b"ox=\0"), window_set_ox, 1);
+        define_method(klass, cstr(b"ox=\0"), window_set_ox, -1);
         define_method(klass, cstr(b"oy\0"), window_get_oy, 0);
-        define_method(klass, cstr(b"oy=\0"), window_set_oy, 1);
+        define_method(klass, cstr(b"oy=\0"), window_set_oy, -1);
         define_method(klass, cstr(b"opacity\0"), window_get_opacity, 0);
-        define_method(klass, cstr(b"opacity=\0"), window_set_opacity, 1);
+        define_method(klass, cstr(b"opacity=\0"), window_set_opacity, -1);
         define_method(klass, cstr(b"back_opacity\0"), window_get_back_opacity, 0);
-        define_method(klass, cstr(b"back_opacity=\0"), window_set_back_opacity, 1);
+        define_method(klass, cstr(b"back_opacity=\0"), window_set_back_opacity, -1);
         define_method(
             klass,
             cstr(b"contents_opacity\0"),
@@ -130,19 +130,19 @@ pub fn init() -> Result<()> {
             1,
         );
         define_method(klass, cstr(b"openness\0"), window_get_openness, 0);
-        define_method(klass, cstr(b"openness=\0"), window_set_openness, 1);
+        define_method(klass, cstr(b"openness=\0"), window_set_openness, -1);
         define_method(klass, cstr(b"visible\0"), window_get_visible, 0);
-        define_method(klass, cstr(b"visible=\0"), window_set_visible, 1);
+        define_method(klass, cstr(b"visible=\0"), window_set_visible, -1);
         define_method(klass, cstr(b"active\0"), window_get_active, 0);
-        define_method(klass, cstr(b"active=\0"), window_set_active, 1);
+        define_method(klass, cstr(b"active=\0"), window_set_active, -1);
         define_method(klass, cstr(b"pause\0"), window_get_pause, 0);
-        define_method(klass, cstr(b"pause=\0"), window_set_pause, 1);
+        define_method(klass, cstr(b"pause=\0"), window_set_pause, -1);
         define_method(klass, cstr(b"tone\0"), window_get_tone, 0);
-        define_method(klass, cstr(b"tone=\0"), window_set_tone, 1);
+        define_method(klass, cstr(b"tone=\0"), window_set_tone, -1);
         define_method(klass, cstr(b"color\0"), window_get_color, 0);
-        define_method(klass, cstr(b"color=\0"), window_set_color, 1);
+        define_method(klass, cstr(b"color=\0"), window_set_color, -1);
         define_method(klass, cstr(b"cursor_rect\0"), window_get_cursor_rect, 0);
-        define_method(klass, cstr(b"cursor_rect=\0"), window_set_cursor_rect, 1);
+        define_method(klass, cstr(b"cursor_rect=\0"), window_set_cursor_rect, -1);
         define_method(klass, cstr(b"open\0"), window_open, 0);
         define_method(klass, cstr(b"close\0"), window_close, 0);
         define_method(klass, cstr(b"update\0"), window_update, 0);
