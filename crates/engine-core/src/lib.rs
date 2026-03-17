@@ -6,7 +6,7 @@ use input::InputState;
 use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
-use rgss_bindings::RubyVm;
+use rgss_bindings::{update_input, RubyVm};
 use rmxp_data::{MapData, SystemData};
 use std::{
     env,
@@ -158,6 +158,7 @@ pub fn run(config: AppConfig) -> Result<()> {
                 accumulator += now - last_tick;
                 last_tick = now;
                 while accumulator >= FIXED_TIMESTEP {
+                    update_input(input_state.snapshot());
                     game.update(FIXED_TIMESTEP, &input_state);
                     accumulator -= FIXED_TIMESTEP;
                 }

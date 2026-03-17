@@ -1,5 +1,8 @@
 //! Embedded Ruby (MRI) host for RGSS scripts.
 
+mod graphics;
+mod input;
+
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use rb_sys::{
@@ -15,6 +18,11 @@ use tracing::{info, warn};
 
 static RUBY_INIT: OnceCell<()> = OnceCell::new();
 
+pub use input::{
+    update_input, InputSnapshot, BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_DOWN, BUTTON_LEFT,
+    BUTTON_RIGHT, BUTTON_UP,
+};
+
 pub struct RubyVm {
     booted: bool,
 }
@@ -29,6 +37,8 @@ impl RubyVm {
         ensure_ruby()?;
         if !self.booted {
             info!(target: "rgss", "Ruby VM initialised");
+            graphics::init()?;
+            input::init()?;
             self.booted = true;
         }
         Ok(())
