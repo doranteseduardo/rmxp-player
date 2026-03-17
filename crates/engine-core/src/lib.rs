@@ -59,6 +59,7 @@ pub fn run(config: AppConfig) -> Result<()> {
 
     let project = match GameProject::from_env() {
         Ok(project) => {
+            rgss_bindings::set_project_root(project.root());
             info!(target: "project", root = ?project.data_dir(), "Project path resolved");
             Some(project)
         }

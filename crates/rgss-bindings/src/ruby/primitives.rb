@@ -126,6 +126,10 @@ class Table
 
   alias dup clone
 
+  def to_native_s16
+    @data.pack('s<*')
+  end
+
   private
 
   def index_of(x, y, z)
@@ -290,13 +294,15 @@ class Bitmap
     @font = Font.new
     if arg1.is_a?(String)
       @path = arg1
-      size = [arg2 ? arg2.to_i : 32, arg2 ? arg2.to_i : 32]
-      allocate_native(size[0], size[1])
-      RGSS::Debug.warn_once('Bitmap string constructor not wired to native loader yet')
+      @native_id = RGSS::Native.bitmap_load(@path)
+      unless @native_id
+        RGSS::Debug.warn_once("Bitmap load failed: #{@path}")
+        allocate_blank(32, 32)
+      end
     else
       width = arg1.to_i
       height = (arg2 || arg1).to_i
-      allocate_native(width, height)
+      allocate_blank(width, height)
     end
   end
 
@@ -371,7 +377,7 @@ class Bitmap
 
   private
 
-  def allocate_native(width, height)
+  def allocate_blank(width, height)
     unless RGSS.const_defined?(:Native)
       RGSS::Debug.warn_once('RGSS::Native bitmap bridge not available')
       @native_id = nil
@@ -615,6 +621,115 @@ class Sprite
 end
 
 class Plane < Sprite
+  attr_reader :viewport, :bitmap, :tone, :color, :native_id
+  attr_reader :z, :ox, :oy, :zoom_x, :zoom_y, :opacity, :blend_type, :visible
+
+  def initialize(viewport = nil)
+    @viewport = viewport
+    @bitmap = nil
+    @z = 0
+    @ox = 0.0
+    @oy = 0.0
+    @zoom_x = 1.0
+    @zoom_y = 1.0
+    @opacity = 255
+    @blend_type = 0
+    @visible = true
+    @tone = Tone.new
+    @color = Color.new
+    @disposed = false
+    @native_id = RGSS::Native.plane_create(@viewport&.native_id)
+    sync_all
+  end
+
+  def disposed?
+    @disposed
+  end
+
+  def dispose
+    return if disposed?
+    RGSS::Native.plane_dispose(@native_id)
+    @disposed = true
+  end
+
+  def viewport=(viewport)
+    @viewport = viewport
+    RGSS::Native.plane_set_viewport(@native_id, @viewport&.native_id)
+  end
+
+  def bitmap=(bitmap)
+    @bitmap = bitmap
+    RGSS::Native.plane_set_bitmap(@native_id, @bitmap&.native_id)
+  end
+
+  def z=(value)
+    @z = value.to_i
+    RGSS::Native.plane_set_z(@native_id, @z)
+  end
+
+  def ox=(value)
+    @ox = value.to_f
+    RGSS::Native.plane_set_ox(@native_id, @ox)
+  end
+
+  def oy=(value)
+    @oy = value.to_f
+    RGSS::Native.plane_set_oy(@native_id, @oy)
+  end
+
+  def zoom_x=(value)
+    @zoom_x = value.to_f
+    RGSS::Native.plane_set_zoom_x(@native_id, @zoom_x)
+  end
+
+  def zoom_y=(value)
+    @zoom_y = value.to_f
+    RGSS::Native.plane_set_zoom_y(@native_id, @zoom_y)
+  end
+
+  def opacity=(value)
+    @opacity = value.to_i
+    RGSS::Native.plane_set_opacity(@native_id, @opacity)
+  end
+
+  def blend_type=(value)
+    @blend_type = value.to_i
+    RGSS::Native.plane_set_blend_type(@native_id, @blend_type)
+  end
+
+  def visible=(value)
+    @visible = !!value
+    RGSS::Native.plane_set_visible(@native_id, @visible)
+  end
+
+  def tone=(value)
+    @tone = value.is_a?(Tone) ? value.dup : Tone.new
+    RGSS::Native.plane_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+  end
+
+  def color=(value)
+    @color = value.is_a?(Color) ? value.dup : Color.new
+    RGSS::Native.plane_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+  end
+
+  def update; end
+
+  private
+
+  def sync_all
+    RGSS::Native.plane_set_viewport(@native_id, @viewport&.native_id)
+    RGSS::Native.plane_set_bitmap(@native_id, @bitmap&.native_id)
+    RGSS::Native.plane_set_z(@native_id, @z)
+    RGSS::Native.plane_set_ox(@native_id, @ox)
+    RGSS::Native.plane_set_oy(@native_id, @oy)
+    RGSS::Native.plane_set_zoom_x(@native_id, @zoom_x)
+    RGSS::Native.plane_set_zoom_y(@native_id, @zoom_y)
+    RGSS::Native.plane_set_opacity(@native_id, @opacity)
+    RGSS::Native.plane_set_blend_type(@native_id, @blend_type)
+    RGSS::Native.plane_set_visible(@native_id, @visible)
+    RGSS::Native.plane_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+    RGSS::Native.plane_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+  end
 end
 
 class Window
@@ -795,21 +910,23 @@ class Window
 end
 
 class Tilemap
-  attr_accessor :viewport, :bitmaps, :map_data, :flash_data,
-                :ox, :oy, :tileset, :autotiles, :visible, :priorities
+  attr_reader :viewport, :tileset, :autotiles, :bitmaps, :map_data, :flash_data,
+              :ox, :oy, :visible, :priorities, :native_id
 
   def initialize(viewport = nil)
     @viewport = viewport
     @tileset = nil
-    @autotiles = Array.new(7)
-    @bitmaps = Array.new(9)
     @map_data = nil
     @flash_data = nil
-    @priorities = Table.new
+    @priorities = nil
     @ox = 0
     @oy = 0
     @visible = true
     @disposed = false
+    @native_id = RGSS::Native.tilemap_create(@viewport&.native_id)
+    @autotiles = AutotileProxy.new(self, 7)
+    @bitmaps = @autotiles
+    sync_all
   end
 
   def disposed?
@@ -817,10 +934,126 @@ class Tilemap
   end
 
   def dispose
+    return if disposed?
+    RGSS::Native.tilemap_dispose(@native_id)
     @disposed = true
   end
 
-  def update; end
+  def viewport=(viewport)
+    @viewport = viewport
+    RGSS::Native.tilemap_set_viewport(@native_id, @viewport&.native_id)
+  end
+
+  def tileset=(bitmap)
+    @tileset = bitmap
+    RGSS::Native.tilemap_set_tileset(@native_id, @tileset&.native_id)
+  end
+
+  def autotiles=(array)
+    @autotiles.replace(array)
+  end
+
+  def bitmaps=(array)
+    self.autotiles = array
+  end
+
+  def map_data=(table)
+    @map_data = table
+    sync_map_data
+  end
+
+  def priorities=(table)
+    @priorities = table
+    sync_priorities
+  end
+
+  def ox=(value)
+    @ox = value.to_i
+    RGSS::Native.tilemap_set_ox(@native_id, @ox)
+  end
+
+  def oy=(value)
+    @oy = value.to_i
+    RGSS::Native.tilemap_set_oy(@native_id, @oy)
+  end
+
+  def visible=(value)
+    @visible = !!value
+    RGSS::Native.tilemap_set_visible(@native_id, @visible)
+  end
+
+  def update
+    RGSS::Native.tilemap_update(@native_id)
+  end
+
+  private
+
+  def sync_all
+    RGSS::Native.tilemap_set_viewport(@native_id, @viewport&.native_id)
+    RGSS::Native.tilemap_set_tileset(@native_id, @tileset&.native_id)
+    @autotiles.each_with_index do |bitmap, index|
+      apply_autotile(index, bitmap)
+    end
+    sync_map_data
+    sync_priorities
+    RGSS::Native.tilemap_set_ox(@native_id, @ox)
+    RGSS::Native.tilemap_set_oy(@native_id, @oy)
+    RGSS::Native.tilemap_set_visible(@native_id, @visible)
+  end
+
+  def sync_map_data
+    return unless @map_data
+    RGSS::Native.tilemap_set_map_data(
+      @native_id,
+      @map_data.xsize,
+      @map_data.ysize,
+      @map_data.zsize,
+      @map_data.to_native_s16
+    )
+  end
+
+  def sync_priorities
+    return unless @priorities
+    RGSS::Native.tilemap_set_priorities(
+      @native_id,
+      @priorities.xsize,
+      @priorities.to_native_s16
+    )
+  end
+
+  def apply_autotile(index, bitmap)
+    RGSS::Native.tilemap_set_autotile(@native_id, index, bitmap&.native_id)
+  end
+
+  class AutotileProxy
+    include Enumerable
+
+    def initialize(owner, size)
+      @owner = owner
+      @data = Array.new(size)
+    end
+
+    def [](index)
+      @data[index]
+    end
+
+    def []=(index, value)
+      return unless index.between?(0, @data.length - 1)
+      @data[index] = value
+      @owner.send(:apply_autotile, index, value)
+    end
+
+    def each(&block)
+      @data.each(&block)
+    end
+
+    def replace(values)
+      values = Array(values)
+      @data.length.times do |index|
+        self[index] = values[index]
+      end
+    end
+  end
 end
 
 module Audio

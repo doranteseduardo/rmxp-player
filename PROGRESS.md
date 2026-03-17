@@ -15,6 +15,9 @@
 - `RGSS::Native` bridge mirrors `Bitmap`, `Viewport`, `Sprite`, and `Window`
   classes so Ruby scripts manipulate the canonical state that Rust snapshots for
   rendering/audio subsystems.
+- Plane and Tilemap RGSS classes now map to native handle stores; Ruby assigns
+  tilesets/autotiles/priorities via `Table` blobs and the renderer rebuilds the
+  map each frame using those live snapshots (ox/oy scroll respected).
 - Added `rmxp-data` crate with a Marshal reader/JSON bridge plus engine wiring
   that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
 - Engine now parses the start map and feeds a rendered tile scene (tileset +
@@ -27,9 +30,9 @@
 
 ## 🚧 Immediate Goals
 
-1. **Scene Loop Integration** – execute `Scripts.rxdata`, feed real RGSS sprite/
-   window data into the renderer, and drive `Graphics.update`/`Input.update`
-   from Ruby.
+1. **Scene Loop Integration** – execute `Scripts.rxdata`, drive the scene stack,
+   and surface characters/windows via the renderer (now that tilemaps, planes,
+   and sprites sync from Ruby).
 2. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fades, loop
    points, and MIDI via `rustysynth`.
 3. **Event/Interpreter Core** – implement Game_Map/Game_Player logic hooked to

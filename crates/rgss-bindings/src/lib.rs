@@ -15,6 +15,7 @@ use rb_sys::{
 use std::{
     ffi::{CStr, CString},
     os::raw::{c_char, c_int},
+    path::Path,
     ptr::addr_of_mut,
 };
 use tracing::{debug, info, warn};
@@ -25,6 +26,14 @@ pub use input::{
     update_input, InputSnapshot, BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_DOWN, BUTTON_LEFT,
     BUTTON_RIGHT, BUTTON_UP,
 };
+pub use native::{
+    bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, BitmapData, PlaneData,
+    SpriteData, TilemapData,
+};
+
+pub fn set_project_root(path: &Path) {
+    native::set_project_root(path);
+}
 
 pub fn sync_graphics_size(width: u32, height: u32) {
     graphics::set_screen_size(width, height);
@@ -36,6 +45,8 @@ pub struct NativeSnapshot {
     pub sprites: usize,
     pub viewports: usize,
     pub windows: usize,
+    pub planes: usize,
+    pub tilemaps: usize,
 }
 
 pub fn native_snapshot() -> NativeSnapshot {
@@ -44,6 +55,8 @@ pub fn native_snapshot() -> NativeSnapshot {
         sprites: native::sprite_snapshot().len(),
         viewports: native::viewport_snapshot().len(),
         windows: native::window_snapshot().len(),
+        planes: native::plane_snapshot().len(),
+        tilemaps: native::tilemap_snapshot().len(),
     }
 }
 

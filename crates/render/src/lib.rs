@@ -16,6 +16,7 @@ pub struct RenderFrame<'a> {
     pub scene: &'a TileScene,
     pub camera: Camera,
     pub player_marker: Option<PlayerMarker>,
+    pub sprites: &'a [SpriteInstance],
 }
 
 #[derive(Clone, Copy)]
@@ -27,6 +28,15 @@ pub struct Camera {
 pub struct PlayerMarker {
     pub tile_pos: (f32, f32),
     pub color: [u8; 4],
+}
+
+#[derive(Clone)]
+pub struct SpriteInstance {
+    pub texture: Arc<RgbaImage>,
+    pub screen_pos: (i32, i32),
+    pub src_rect: (u32, u32, u32, u32),
+    pub opacity: u8,
+    pub z: i32,
 }
 
 #[derive(Clone)]
@@ -106,14 +116,17 @@ impl<'a> Renderer<'a> {
     pub fn render(&mut self, frame_index: u64, frame_data: Option<RenderFrame<'_>>) -> Result<()> {
         let frame = self.pixels.frame_mut();
         match frame_data {
-            Some(data) => draw_tile_scene(
-                data.scene,
-                data.camera,
-                data.player_marker.as_ref(),
-                self.logical_size,
-                frame,
-                frame_index,
-            ),
+            Some(data) => {
+                draw_tile_scene(
+                    data.scene,
+                    data.camera,
+                    data.player_marker.as_ref(),
+                    self.logical_size,
+                    frame,
+                    frame_index,
+                );
+                draw_sprites(self.logical_size, frame, data.sprites);
+            }
             None => draw_gradient(self.logical_size, frame, frame_index),
         }
         self.pixels.render()?;
@@ -312,6 +325,57 @@ fn draw_player_marker(
             let mut color = [dst[0], dst[1], dst[2], dst[3]];
             blend_pixel(&mut color, marker.color);
             dst.copy_from_slice(&color);
+        }
+    }
+}
+
+fn draw_sprites(size: (u32, u32), frame: &mut [u8], sprites: &[SpriteInstance]) {
+    if sprites.is_empty() {
+        return;
+    }
+    for sprite in sprites {
+        draw_sprite(size, frame, sprite);
+    }
+}
+
+fn draw_sprite(size: (u32, u32), frame: &mut [u8], sprite: &SpriteInstance) {
+    if sprite.opacity == 0 {
+        return;
+    }
+    let width = size.0 as i32;
+    let height = size.1 as i32;
+    let tex_width = sprite.texture.width();
+    let tex_height = sprite.texture.height();
+    for sy in 0..sprite.src_rect.3 {
+        let dest_y = sprite.screen_pos.1 + sy as i32;
+        if dest_y < 0 || dest_y >= height {
+            continue;
+        }
+        let src_y = sprite.src_rect.1 + sy;
+        if src_y >= tex_height {
+            continue;
+        }
+        for sx in 0..sprite.src_rect.2 {
+            let dest_x = sprite.screen_pos.0 + sx as i32;
+            if dest_x < 0 || dest_x >= width {
+                continue;
+            }
+            let src_x = sprite.src_rect.0 + sx;
+            if src_x >= tex_width {
+                continue;
+            }
+            let mut color = sprite.texture.get_pixel(src_x, src_y).0;
+            if color[3] == 0 {
+                continue;
+            }
+            if sprite.opacity < 255 {
+                let alpha = (color[3] as u16 * sprite.opacity as u16).saturating_div(255) as u8;
+                color[3] = alpha;
+            }
+            let idx = (dest_y as usize * size.0 as usize + dest_x as usize) * 4;
+            let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];
+            blend_pixel(&mut dst, color);
+            frame[idx..idx + 4].copy_from_slice(&dst);
         }
     }
 }

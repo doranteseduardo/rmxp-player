@@ -17,10 +17,13 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 - ✅ `rmxp-data` crate parses Marshal 4.8 `.rxdata` files (`System`, `MapInfos`,
   maps, tilesets) and feeds typed structs to the engine.
 - ✅ Embedded Ruby 3.2 VM via `rb-sys`, plus an `RGSS::Native` bridge that
-  mirrors Bitmap/Viewport/Sprite/Window classes so Ruby owns scene objects while
-  Rust keeps authoritative state for rendering.
+  mirrors Bitmap/Viewport/Sprite/Window/Plane/Tilemap classes so Ruby owns scene
+  objects while Rust keeps authoritative state for rendering.
 - ✅ Input loop maps WASD/arrow keys into an RGSS-style snapshot so the renderer
   can visualize scrolling/clamping at 640×480 (1:1 pixels, centered player).
+- ✅ Tilemap data written by real RGSS scripts (tileset, autotiles, priorities,
+  scroll offsets) now feeds the renderer, so Ruby code controls which map is
+  displayed instead of the fixed `.rxdata` bootstrap scene.
 - 🚧 Next: wire native RGSS state into the renderer (sprites/windows), implement
   audio channels, drive the scene stack from real scripts, add persistence, and
   stand up iOS/Android shells.
@@ -88,12 +91,13 @@ Controls:
 
 ## Next Steps
 
-1. **RGSS Scene Loop** – execute real `Scripts.rxdata`, populate the native
-   sprite/window registries, and pump their snapshots into the renderer.
+1. **RGSS Scene Loop** – execute real `Scripts.rxdata`, populate sprite/window
+   registries, and drive the renderer with live Ruby scene stacks (characters,
+   maps, UI).
 2. **Audio Playback** – hook RGSS `Audio.*` calls to rodio (BGM/BGS/ME/SE, fades,
    MIDI via `rustysynth`).
-3. **Event Interpreter** – implement Game_Map/Game_Player + event interpreter to
-   mirror RMXP behavior (messages, move routes, encounters).
+3. **Event Interpreter** – implement Game_Map/Game_Player + interpreter loops to
+   mirror RMXP behavior (messages, move routes, encounters, triggers).
 4. **Persistence & Config** – save slots, config values (resolution, control
    mapping, audio levels), and mobile-friendly sandboxes/pickers.
 5. **Mobile Shells** – add Swift/Kotlin launchers that embed the Rust core via

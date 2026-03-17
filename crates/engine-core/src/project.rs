@@ -38,6 +38,10 @@ impl GameProject {
         self.root.join("Data")
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     pub fn load_tileset_image(&self, name: &str) -> Result<RgbaImage> {
         self.load_graphic_image("Tilesets", name, "tileset")
     }

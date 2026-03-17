@@ -1,15 +1,22 @@
-use super::{native_module, HandleStore};
-use anyhow::Result;
+use super::{module, native_module, HandleStore};
+use anyhow::{Context, Result};
+use image::{ImageReader, RgbaImage};
 use once_cell::sync::Lazy;
 use rb_sys::{rb_num2int, rb_num2uint, rb_uint2inum, ruby_special_consts, special_consts, VALUE};
-use std::os::raw::{c_char, c_int};
-use tracing::warn;
+use std::{
+    ffi::CStr,
+    os::raw::{c_char, c_int},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use tracing::{info, warn};
 
 const BITMAP_CREATE_NAME: &[u8] = b"bitmap_create\0";
 const BITMAP_DISPOSE_NAME: &[u8] = b"bitmap_dispose\0";
 const BITMAP_WIDTH_NAME: &[u8] = b"bitmap_width\0";
 const BITMAP_HEIGHT_NAME: &[u8] = b"bitmap_height\0";
 const BITMAP_DISPOSED_NAME: &[u8] = b"bitmap_disposed?\0";
+const BITMAP_LOAD_NAME: &[u8] = b"bitmap_load\0";
 
 static BITMAPS: Lazy<HandleStore<BitmapData>> = Lazy::new(HandleStore::default);
 
@@ -18,14 +25,34 @@ pub struct BitmapData {
     pub width: u32,
     pub height: u32,
     pub disposed: bool,
+    pub texture: Arc<RgbaImage>,
 }
 
 impl BitmapData {
-    fn new(width: u32, height: u32) -> Self {
+    fn blank(width: u32, height: u32) -> Self {
+        let width = width.max(1);
+        let height = height.max(1);
+        let texture = Arc::new(RgbaImage::from_pixel(
+            width,
+            height,
+            image::Rgba([0, 0, 0, 0]),
+        ));
         Self {
             width,
             height,
             disposed: false,
+            texture,
+        }
+    }
+
+    fn with_texture(texture: Arc<RgbaImage>) -> Self {
+        let width = texture.width();
+        let height = texture.height();
+        Self {
+            width,
+            height,
+            disposed: false,
+            texture,
         }
     }
 }
@@ -37,6 +64,7 @@ extern "C" {
         func: Option<unsafe extern "C" fn(c_int, *const VALUE, VALUE) -> VALUE>,
         argc: c_int,
     );
+    fn rb_string_value_cstr(ptr: *mut VALUE) -> *const c_char;
 }
 
 pub fn init() -> Result<()> {
@@ -59,6 +87,7 @@ unsafe fn define_bitmap_api() -> Result<()> {
         Some(bitmap_disposed_q),
         1,
     );
+    rb_define_module_function(native, c_name(BITMAP_LOAD_NAME), Some(bitmap_load), 1);
     Ok(())
 }
 
@@ -76,6 +105,25 @@ unsafe extern "C" fn bitmap_create(argc: c_int, argv: *const VALUE, _self: VALUE
     };
     let id = store_bitmap(width, height);
     rb_uint2inum(id as usize)
+}
+
+unsafe extern "C" fn bitmap_load(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 1 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let mut arg = *argv;
+    let path_ptr = rb_string_value_cstr(&mut arg);
+    if path_ptr.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let path = CStr::from_ptr(path_ptr).to_string_lossy().to_string();
+    match load_bitmap_from_project(&path) {
+        Ok(id) => rb_uint2inum(id as usize),
+        Err(err) => {
+            warn!(target: "rgss", path = %path, error = %err, "Failed to load bitmap");
+            rb_sys::Qnil as VALUE
+        }
+    }
 }
 
 unsafe extern "C" fn bitmap_dispose(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
@@ -121,7 +169,7 @@ unsafe extern "C" fn bitmap_disposed_q(argc: c_int, argv: *const VALUE, _self: V
 }
 
 fn store_bitmap(width: u32, height: u32) -> u32 {
-    BITMAPS.insert(BitmapData::new(width, height))
+    store_bitmap_data(BitmapData::blank(width, height))
 }
 
 fn with_bitmap<F, R>(id: u32, func: F) -> Option<R>
@@ -149,4 +197,51 @@ fn int_to_value(value: i64) -> VALUE {
 
 fn c_name(bytes: &[u8]) -> *const c_char {
     bytes.as_ptr() as *const c_char
+}
+
+fn store_bitmap_data(data: BitmapData) -> u32 {
+    BITMAPS.insert(data)
+}
+
+fn load_bitmap_from_project(relative: &str) -> Result<u32> {
+    let root = module::project_root().ok_or_else(|| anyhow::anyhow!("project root not set"))?;
+    let candidates = candidate_paths(relative);
+    for candidate in candidates {
+        let path = if candidate.is_absolute() {
+            candidate
+        } else {
+            root.join(&candidate)
+        };
+        if path.exists() {
+            return load_bitmap_from_file(&path);
+        }
+    }
+    anyhow::bail!("{} not found under {}", relative, root.display())
+}
+
+fn candidate_paths(relative: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let base = PathBuf::from(relative);
+    paths.push(base.clone());
+    if base.extension().is_none() {
+        paths.push(base.with_extension("png"));
+        paths.push(base.with_extension("PNG"));
+    }
+    paths
+}
+
+fn load_bitmap_from_file(path: &Path) -> Result<u32> {
+    let image = ImageReader::open(path)
+        .with_context(|| format!("opening {}", path.display()))?
+        .decode()
+        .with_context(|| format!("decoding {}", path.display()))?
+        .to_rgba8();
+    info!(
+        target: "rgss",
+        file = %path.display(),
+        width = image.width(),
+        height = image.height(),
+        "bitmap loaded"
+    );
+    Ok(store_bitmap_data(BitmapData::with_texture(Arc::new(image))))
 }
