@@ -6,18 +6,24 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 
 ## Current Status
 
-- ✅ Workspace scaffolding with crates for `engine-core`, `render`, `audio`,
-  `platform`, `rgss-bindings`, `mobile-shell`, and `desktop-runner` binary.
-- ✅ Winit + Pixels desktop loop rendering a placeholder gradient.
-- ✅ Rodio audio backend initialization stub.
-- ✅ Platform helper for config directories and logging bootstrap.
-- ✅ `rmxp-data` crate with a Marshal (Ruby 4.8) parser + JSON helpers.
-- ✅ System/MapInfos parsing + color-coded debug map rendering sourced from the
-  project's start map (when `RMXP_GAME_PATH` is set).
-- ✅ Tilesets/autotiles load with RGSS priorities + animation support; on-screen
-  player marker moves with the fixed 60 Hz loop to validate input/pathing.
-- 🚧 Pending: real RGSS embedding, map renderer, input mapping, event system,
-  audio playback, save/load, and mobile launchers.
+- ✅ Cargo workspace scaffolded (`engine-core`, `render`, `audio`, `data`,
+  `platform`, `rgss-bindings`, `mobile-shell`, `desktop-runner`).
+- ✅ Desktop runner boots a `winit` + `pixels` loop with Metal/Vulkan/DirectX
+  backends and renders real RMXP tilemaps (tilesets + autotiles) pulled from
+  `System.rxdata`, respecting priorities and animated quads.
+- ✅ Rodio/CPAL audio system initializes (playback hooks pending).
+- ✅ Platform helper configures config/save directories and installs `tracing`
+  logging (enable verbose logs via `RMXP_LOG=debug`).
+- ✅ `rmxp-data` crate parses Marshal 4.8 `.rxdata` files (`System`, `MapInfos`,
+  maps, tilesets) and feeds typed structs to the engine.
+- ✅ Embedded Ruby 3.2 VM via `rb-sys`, plus an `RGSS::Native` bridge that
+  mirrors Bitmap/Viewport/Sprite/Window classes so Ruby owns scene objects while
+  Rust keeps authoritative state for rendering.
+- ✅ Input loop maps WASD/arrow keys into an RGSS-style snapshot so the renderer
+  can visualize scrolling/clamping at 640×480 (1:1 pixels, centered player).
+- 🚧 Next: wire native RGSS state into the renderer (sprites/windows), implement
+  audio channels, drive the scene stack from real scripts, add persistence, and
+  stand up iOS/Android shells.
 
 ## Project Layout
 
@@ -82,10 +88,13 @@ Controls:
 
 ## Next Steps
 
-1. Flesh out `rgss-bindings` with embedded Ruby MRI bootstrap and native class
-   shims for RGSS.
-2. Replace the placeholder gradient renderer with tilemap/sprite rendering backed
-   by real RMXP assets.
-3. Implement resource loading, filesystem abstractions, and project selection UI.
-4. Expand `platform` crate for mobile-safe paths and asynchronous file pickers.
-5. Add mobile shells (Swift/Kotlin) leveraging the shared Rust engine via winit.
+1. **RGSS Scene Loop** – execute real `Scripts.rxdata`, populate the native
+   sprite/window registries, and pump their snapshots into the renderer.
+2. **Audio Playback** – hook RGSS `Audio.*` calls to rodio (BGM/BGS/ME/SE, fades,
+   MIDI via `rustysynth`).
+3. **Event Interpreter** – implement Game_Map/Game_Player + event interpreter to
+   mirror RMXP behavior (messages, move routes, encounters).
+4. **Persistence & Config** – save slots, config values (resolution, control
+   mapping, audio levels), and mobile-friendly sandboxes/pickers.
+5. **Mobile Shells** – add Swift/Kotlin launchers that embed the Rust core via
+   `winit` mobile backends (document pickers, lifecycle, storage access).

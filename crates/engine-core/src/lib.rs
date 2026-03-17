@@ -6,7 +6,7 @@ use input::InputState;
 use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
-use rgss_bindings::{sync_graphics_size, update_input, RubyVm, ScriptSection};
+use rgss_bindings::{native_snapshot, sync_graphics_size, update_input, RubyVm, ScriptSection};
 use rmxp_data::{MapData, SystemData};
 use std::{
     env,
@@ -138,6 +138,15 @@ pub fn run(config: AppConfig) -> Result<()> {
                 if let Err(err) = ruby_vm.run_scripts(&sections) {
                     warn!(target: "rgss", error = %err, "Failed to evaluate RGSS scripts");
                 }
+                let snapshot = native_snapshot();
+                info!(
+                    target: "rgss",
+                    bitmaps = snapshot.bitmaps,
+                    sprites = snapshot.sprites,
+                    viewports = snapshot.viewports,
+                    windows = snapshot.windows,
+                    "RGSS native bridge ready"
+                );
             }
             Err(err) => {
                 warn!(target: "project", error = %err, "Failed to load Scripts.rxdata");

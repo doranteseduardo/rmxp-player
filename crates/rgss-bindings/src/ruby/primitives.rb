@@ -283,33 +283,46 @@ class Font
 end
 
 class Bitmap
-  attr_reader :width, :height
   attr_accessor :font
+  attr_reader :native_id
 
   def initialize(arg1, arg2 = nil)
+    @font = Font.new
     if arg1.is_a?(String)
       @path = arg1
-      @width = arg2 ? arg2.to_i : 0
-      @height = 0
+      size = [arg2 ? arg2.to_i : 32, arg2 ? arg2.to_i : 32]
+      allocate_native(size[0], size[1])
+      RGSS::Debug.warn_once('Bitmap string constructor not wired to native loader yet')
     else
-      @path = nil
-      @width = arg1.to_i
-      @height = (arg2 || arg1).to_i
+      width = arg1.to_i
+      height = (arg2 || arg1).to_i
+      allocate_native(width, height)
     end
-    @disposed = false
-    @font = Font.new
   end
 
   def rect
-    Rect.new(0, 0, @width, @height)
+    Rect.new(0, 0, width, height)
   end
 
   def disposed?
-    @disposed
+    return true unless @native_id
+    RGSS::Native.bitmap_disposed?(@native_id)
   end
 
   def dispose
-    @disposed = true
+    return unless @native_id
+    RGSS::Native.bitmap_dispose(@native_id)
+    @native_id = nil
+  end
+
+  def width
+    return 0 unless @native_id
+    RGSS::Native.bitmap_width(@native_id)
+  end
+
+  def height
+    return 0 unless @native_id
+    RGSS::Native.bitmap_height(@native_id)
   end
 
   def hue_change(_value)
@@ -353,21 +366,27 @@ class Bitmap
   end
 
   def dup
-    copy = Bitmap.new(@width, @height)
-    RGSS::Debug.warn_once('Bitmap#dup')
-    copy
+    Bitmap.new(width, height)
+  end
+
+  private
+
+  def allocate_native(width, height)
+    unless RGSS.const_defined?(:Native)
+      RGSS::Debug.warn_once('RGSS::Native bitmap bridge not available')
+      @native_id = nil
+      return
+    end
+    @native_id = RGSS::Native.bitmap_create([width, 1].max, [height, 1].max)
   end
 end
 
 class Viewport
-  attr_accessor :rect, :visible, :z, :ox, :oy, :color, :tone
+  attr_reader :rect, :visible, :z, :ox, :oy, :color, :tone, :native_id
 
   def initialize(x_or_rect, y = nil, width = nil, height = nil)
-    if x_or_rect.is_a?(Rect)
-      @rect = x_or_rect.dup
-    else
-      @rect = Rect.new(x_or_rect, y || 0, width || 0, height || 0)
-    end
+    rect = x_or_rect.is_a?(Rect) ? x_or_rect.dup : Rect.new(x_or_rect, y || 0, width || 0, height || 0)
+    @rect = rect
     @visible = true
     @z = 0
     @ox = 0
@@ -375,6 +394,11 @@ class Viewport
     @color = Color.new
     @tone = Tone.new
     @disposed = false
+    @native_id = RGSS::Native.viewport_create(@rect.x, @rect.y, @rect.width, @rect.height)
+    sync_rect
+    sync_visible
+    sync_z
+    sync_origin
   end
 
   def update; end
@@ -384,32 +408,80 @@ class Viewport
   end
 
   def dispose
+    return if disposed?
+    RGSS::Native.viewport_dispose(@native_id)
     @disposed = true
+  end
+
+  def rect=(rect)
+    @rect = rect.dup
+    sync_rect
+  end
+
+  def visible=(value)
+    @visible = !!value
+    sync_visible
+  end
+
+  def z=(value)
+    @z = value.to_i
+    sync_z
+  end
+
+  def ox=(value)
+    @ox = value.to_i
+    RGSS::Native.viewport_set_ox(@native_id, @ox)
+  end
+
+  def oy=(value)
+    @oy = value.to_i
+    RGSS::Native.viewport_set_oy(@native_id, @oy)
+  end
+
+  private
+
+  def sync_rect
+    RGSS::Native.viewport_set_rect(@native_id, @rect.x, @rect.y, @rect.width, @rect.height)
+  end
+
+  def sync_visible
+    RGSS::Native.viewport_set_visible(@native_id, @visible)
+  end
+
+  def sync_z
+    RGSS::Native.viewport_set_z(@native_id, @z)
+  end
+
+  def sync_origin
+    RGSS::Native.viewport_set_ox(@native_id, @ox)
+    RGSS::Native.viewport_set_oy(@native_id, @oy)
   end
 end
 
 class Sprite
-  attr_accessor :bitmap, :x, :y, :z, :ox, :oy, :zoom_x, :zoom_y,
-                :angle, :mirror, :bush_depth, :opacity, :blend_type,
-                :color, :tone, :visible, :viewport, :src_rect
+  attr_reader :bitmap, :viewport, :color, :tone, :src_rect, :native_id
+  attr_reader :x, :y, :z, :ox, :oy, :zoom_x, :zoom_y, :angle, :mirror,
+              :bush_depth, :opacity, :blend_type, :visible
 
   def initialize(viewport = nil)
     @viewport = viewport
     @bitmap = nil
-    @x = @y = 0
+    @x = @y = 0.0
     @z = 0
-    @ox = @oy = 0
+    @ox = @oy = 0.0
     @zoom_x = @zoom_y = 1.0
     @angle = 0.0
     @mirror = false
     @bush_depth = 0
     @opacity = 255
     @blend_type = 0
+    @visible = true
     @color = Color.new
     @tone = Tone.new
-    @visible = true
     @src_rect = Rect.new
     @disposed = false
+    @native_id = RGSS::Native.sprite_create(@viewport&.native_id)
+    sync_all
   end
 
   def disposed?
@@ -417,7 +489,99 @@ class Sprite
   end
 
   def dispose
+    return if disposed?
+    RGSS::Native.sprite_dispose(@native_id)
     @disposed = true
+  end
+
+  def viewport=(viewport)
+    @viewport = viewport
+    RGSS::Native.sprite_set_viewport(@native_id, @viewport&.native_id)
+  end
+
+  def bitmap=(bitmap)
+    @bitmap = bitmap
+    RGSS::Native.sprite_set_bitmap(@native_id, @bitmap&.native_id)
+  end
+
+  def x=(value)
+    @x = value.to_f
+    RGSS::Native.sprite_set_x(@native_id, @x)
+  end
+
+  def y=(value)
+    @y = value.to_f
+    RGSS::Native.sprite_set_y(@native_id, @y)
+  end
+
+  def z=(value)
+    @z = value.to_i
+    RGSS::Native.sprite_set_z(@native_id, @z)
+  end
+
+  def ox=(value)
+    @ox = value.to_f
+    RGSS::Native.sprite_set_ox(@native_id, @ox)
+  end
+
+  def oy=(value)
+    @oy = value.to_f
+    RGSS::Native.sprite_set_oy(@native_id, @oy)
+  end
+
+  def zoom_x=(value)
+    @zoom_x = value.to_f
+    RGSS::Native.sprite_set_zoom_x(@native_id, @zoom_x)
+  end
+
+  def zoom_y=(value)
+    @zoom_y = value.to_f
+    RGSS::Native.sprite_set_zoom_y(@native_id, @zoom_y)
+  end
+
+  def angle=(value)
+    @angle = value.to_f
+    RGSS::Native.sprite_set_angle(@native_id, @angle)
+  end
+
+  def mirror=(value)
+    @mirror = !!value
+    RGSS::Native.sprite_set_mirror(@native_id, @mirror)
+  end
+
+  def bush_depth=(value)
+    @bush_depth = value.to_i
+    RGSS::Native.sprite_set_bush_depth(@native_id, @bush_depth)
+  end
+
+  def opacity=(value)
+    @opacity = value.to_i
+    RGSS::Native.sprite_set_opacity(@native_id, @opacity)
+  end
+
+  def blend_type=(value)
+    @blend_type = value.to_i
+    RGSS::Native.sprite_set_blend_type(@native_id, @blend_type)
+  end
+
+  def visible=(value)
+    @visible = !!value
+    RGSS::Native.sprite_set_visible(@native_id, @visible)
+  end
+
+  def src_rect=(rect)
+    @src_rect = rect.dup
+    RGSS::Native.sprite_set_src_rect(@native_id, @src_rect.x, @src_rect.y, @src_rect.width, @src_rect.height)
+  end
+
+  def color=(value)
+    @color = value.is_a?(Color) ? value.dup : Color.new
+    RGSS::Native.sprite_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+  end
+
+  def tone=(value)
+    @tone = value.is_a?(Tone) ? value.dup : Tone.new
+    RGSS::Native.sprite_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
   end
 
   def flash(*_args)
@@ -425,16 +589,39 @@ class Sprite
   end
 
   def update; end
+
+  private
+
+  def sync_all
+    RGSS::Native.sprite_set_viewport(@native_id, @viewport&.native_id)
+    RGSS::Native.sprite_set_bitmap(@native_id, @bitmap&.native_id)
+    RGSS::Native.sprite_set_x(@native_id, @x)
+    RGSS::Native.sprite_set_y(@native_id, @y)
+    RGSS::Native.sprite_set_z(@native_id, @z)
+    RGSS::Native.sprite_set_ox(@native_id, @ox)
+    RGSS::Native.sprite_set_oy(@native_id, @oy)
+    RGSS::Native.sprite_set_zoom_x(@native_id, @zoom_x)
+    RGSS::Native.sprite_set_zoom_y(@native_id, @zoom_y)
+    RGSS::Native.sprite_set_angle(@native_id, @angle)
+    RGSS::Native.sprite_set_mirror(@native_id, @mirror)
+    RGSS::Native.sprite_set_bush_depth(@native_id, @bush_depth)
+    RGSS::Native.sprite_set_opacity(@native_id, @opacity)
+    RGSS::Native.sprite_set_blend_type(@native_id, @blend_type)
+    RGSS::Native.sprite_set_visible(@native_id, @visible)
+    RGSS::Native.sprite_set_src_rect(@native_id, @src_rect.x, @src_rect.y, @src_rect.width, @src_rect.height)
+    RGSS::Native.sprite_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+    RGSS::Native.sprite_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+  end
 end
 
 class Plane < Sprite
 end
 
 class Window
-  attr_accessor :x, :y, :z, :ox, :oy, :width, :height, :visible,
-                :openness, :windowskin, :contents, :active, :pause,
-                :cursor_rect, :tone, :color, :opacity, :back_opacity,
-                :contents_opacity, :viewport
+  attr_reader :viewport, :windowskin, :contents, :cursor_rect, :tone, :color,
+              :native_id, :x, :y, :z, :ox, :oy, :width, :height,
+              :opacity, :back_opacity, :contents_opacity, :openness,
+              :visible, :active, :pause
 
   def initialize(x = 0, y = 0, width = 32, height = 32, viewport = nil)
     @x = x.to_i
@@ -443,20 +630,22 @@ class Window
     @ox = @oy = 0
     @width = width.to_i
     @height = height.to_i
-    @visible = true
-    @openness = 255
-    @windowskin = nil
-    @contents = nil
-    @active = true
-    @pause = false
-    @cursor_rect = Rect.new
-    @tone = Tone.new
-    @color = Color.new
     @opacity = 255
     @back_opacity = 255
     @contents_opacity = 255
+    @openness = 255
+    @visible = true
+    @active = true
+    @pause = false
+    @windowskin = nil
+    @contents = nil
+    @cursor_rect = Rect.new
+    @tone = Tone.new
+    @color = Color.new
     @viewport = viewport
     @disposed = false
+    @native_id = RGSS::Native.window_create
+    sync_all
   end
 
   def disposed?
@@ -464,18 +653,145 @@ class Window
   end
 
   def dispose
+    return if disposed?
+    RGSS::Native.window_dispose(@native_id)
     @disposed = true
   end
 
+  def viewport=(viewport)
+    @viewport = viewport
+    RGSS::Native.window_set_viewport(@native_id, @viewport&.native_id)
+  end
+
+  def windowskin=(bitmap)
+    @windowskin = bitmap
+    RGSS::Native.window_set_windowskin(@native_id, @windowskin&.native_id)
+  end
+
+  def contents=(bitmap)
+    @contents = bitmap
+    RGSS::Native.window_set_contents(@native_id, @contents&.native_id)
+  end
+
+  def x=(value)
+    @x = value.to_i
+    RGSS::Native.window_set_x(@native_id, @x)
+  end
+
+  def y=(value)
+    @y = value.to_i
+    RGSS::Native.window_set_y(@native_id, @y)
+  end
+
+  def z=(value)
+    @z = value.to_i
+    RGSS::Native.window_set_z(@native_id, @z)
+  end
+
+  def width=(value)
+    @width = value.to_i
+    RGSS::Native.window_set_width(@native_id, @width)
+  end
+
+  def height=(value)
+    @height = value.to_i
+    RGSS::Native.window_set_height(@native_id, @height)
+  end
+
+  def ox=(value)
+    @ox = value.to_i
+    RGSS::Native.window_set_ox(@native_id, @ox)
+  end
+
+  def oy=(value)
+    @oy = value.to_i
+    RGSS::Native.window_set_oy(@native_id, @oy)
+  end
+
+  def opacity=(value)
+    @opacity = value.to_i
+    RGSS::Native.window_set_opacity(@native_id, @opacity)
+  end
+
+  def back_opacity=(value)
+    @back_opacity = value.to_i
+    RGSS::Native.window_set_back_opacity(@native_id, @back_opacity)
+  end
+
+  def contents_opacity=(value)
+    @contents_opacity = value.to_i
+    RGSS::Native.window_set_contents_opacity(@native_id, @contents_opacity)
+  end
+
+  def openness=(value)
+    @openness = value.to_i.clamp(0, 255)
+    RGSS::Native.window_set_openness(@native_id, @openness)
+  end
+
+  def visible=(value)
+    @visible = !!value
+    RGSS::Native.window_set_visible(@native_id, @visible)
+  end
+
+  def active=(value)
+    @active = !!value
+    RGSS::Native.window_set_active(@native_id, @active)
+  end
+
+  def pause=(value)
+    @pause = !!value
+    RGSS::Native.window_set_pause(@native_id, @pause)
+  end
+
+  def tone=(value)
+    @tone = value.is_a?(Tone) ? value.dup : Tone.new
+    RGSS::Native.window_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+  end
+
+  def color=(value)
+    @color = value.is_a?(Color) ? value.dup : Color.new
+    RGSS::Native.window_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+  end
+
+  def cursor_rect=(rect)
+    @cursor_rect = rect.dup
+    RGSS::Native.window_set_cursor_rect(@native_id, @cursor_rect.x, @cursor_rect.y, @cursor_rect.width, @cursor_rect.height)
+  end
+
   def open
-    @openness = 255
+    self.openness = 255
   end
 
   def close
-    @openness = 0
+    self.openness = 0
   end
 
   def update; end
+
+  private
+
+  def sync_all
+    RGSS::Native.window_set_viewport(@native_id, @viewport&.native_id)
+    RGSS::Native.window_set_windowskin(@native_id, @windowskin&.native_id)
+    RGSS::Native.window_set_contents(@native_id, @contents&.native_id)
+    RGSS::Native.window_set_x(@native_id, @x)
+    RGSS::Native.window_set_y(@native_id, @y)
+    RGSS::Native.window_set_z(@native_id, @z)
+    RGSS::Native.window_set_width(@native_id, @width)
+    RGSS::Native.window_set_height(@native_id, @height)
+    RGSS::Native.window_set_ox(@native_id, @ox)
+    RGSS::Native.window_set_oy(@native_id, @oy)
+    RGSS::Native.window_set_opacity(@native_id, @opacity)
+    RGSS::Native.window_set_back_opacity(@native_id, @back_opacity)
+    RGSS::Native.window_set_contents_opacity(@native_id, @contents_opacity)
+    RGSS::Native.window_set_openness(@native_id, @openness)
+    RGSS::Native.window_set_visible(@native_id, @visible)
+    RGSS::Native.window_set_active(@native_id, @active)
+    RGSS::Native.window_set_pause(@native_id, @pause)
+    RGSS::Native.window_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+    RGSS::Native.window_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+    RGSS::Native.window_set_cursor_rect(@native_id, @cursor_rect.x, @cursor_rect.y, @cursor_rect.width, @cursor_rect.height)
+  end
 end
 
 class Tilemap

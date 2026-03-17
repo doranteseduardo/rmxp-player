@@ -3,6 +3,7 @@
 mod graphics;
 mod input;
 mod kernel;
+mod native;
 mod scripts;
 
 use anyhow::{anyhow, Result};
@@ -29,6 +30,23 @@ pub fn sync_graphics_size(width: u32, height: u32) {
     graphics::set_screen_size(width, height);
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NativeSnapshot {
+    pub bitmaps: usize,
+    pub sprites: usize,
+    pub viewports: usize,
+    pub windows: usize,
+}
+
+pub fn native_snapshot() -> NativeSnapshot {
+    NativeSnapshot {
+        bitmaps: native::bitmap_snapshot().len(),
+        sprites: native::sprite_snapshot().len(),
+        viewports: native::viewport_snapshot().len(),
+        windows: native::window_snapshot().len(),
+    }
+}
+
 pub struct RubyVm {
     booted: bool,
 }
@@ -52,6 +70,7 @@ impl RubyVm {
             graphics::init()?;
             kernel::init()?;
             input::init()?;
+            native::init()?;
             self.booted = true;
             scripts::load(self)?;
         }
