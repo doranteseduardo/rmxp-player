@@ -195,7 +195,12 @@ impl RubyValue {
 
 fn decode_user_defined(class_name: &str, data: &[u8]) -> Value {
     match class_name {
-        "Color" | "Tone" if data.len() >= 32 => {
+        name if (name == "Color"
+            || name == "Tone"
+            || name.ends_with("::Color")
+            || name.ends_with("::Tone"))
+            && data.len() >= 32 =>
+        {
             let r = f64::from_le_bytes(data[0..8].try_into().unwrap());
             let g = f64::from_le_bytes(data[8..16].try_into().unwrap());
             let b = f64::from_le_bytes(data[16..24].try_into().unwrap());
@@ -220,7 +225,7 @@ fn decode_user_defined(class_name: &str, data: &[u8]) -> Value {
                     .map(Value::Number)
                     .unwrap_or(Value::Null),
             );
-            let label = if class_name == "Color" {
+            let label = if class_name.ends_with("Color") {
                 "alpha"
             } else {
                 "gray"
@@ -233,7 +238,7 @@ fn decode_user_defined(class_name: &str, data: &[u8]) -> Value {
             );
             Value::Object(map)
         }
-        "Table" if data.len() >= 20 => {
+        name if (name == "Table" || name.ends_with("::Table")) && data.len() >= 20 => {
             let dims = i32::from_le_bytes(data[0..4].try_into().unwrap());
             let xsize = i32::from_le_bytes(data[4..8].try_into().unwrap());
             let ysize = i32::from_le_bytes(data[8..12].try_into().unwrap());

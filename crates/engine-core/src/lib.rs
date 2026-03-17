@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use audio::AudioSystem;
+use image::RgbaImage;
 use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
-use render::{Renderer, TileDebugView};
+use render::{AutotileTexture, Renderer, TileScene};
 use rgss_bindings::RubyVm;
-use rmxp_data::MapData;
+use rmxp_data::{MapData, SystemData};
+use std::{env, sync::Arc};
 use tracing::{info, warn};
 use winit::{
     dpi::LogicalSize,
@@ -60,12 +62,12 @@ pub fn run(config: AppConfig) -> Result<()> {
         }
     };
 
-    let (_database, tile_view) = if let Some(project_ref) = project.as_ref() {
+    let (_database, tile_scene) = if let Some(project_ref) = project.as_ref() {
         match project_ref.load_database() {
             Ok(db) => {
                 db.log_summary();
-                let view = build_initial_tile_view(project_ref, &db);
-                (Some(db), view)
+                let scene = build_initial_tile_scene(project_ref, &db);
+                (Some(db), scene)
             }
             Err(err) => {
                 warn!(target: "project", error = %err, "Failed to load project data");
@@ -116,7 +118,7 @@ pub fn run(config: AppConfig) -> Result<()> {
                     }
                     WindowEvent::CloseRequested => target.exit(),
                     WindowEvent::RedrawRequested => {
-                        if let Err(err) = renderer.render(frame_index, tile_view.as_ref()) {
+                        if let Err(err) = renderer.render(frame_index, tile_scene.as_ref()) {
                             warn!(target: "render", error = %err, "render error, exiting");
                             target.exit();
                             return;
@@ -140,15 +142,53 @@ pub fn run(config: AppConfig) -> Result<()> {
     Ok(())
 }
 
-fn build_initial_tile_view(project: &GameProject, db: &GameDatabase) -> Option<TileDebugView> {
+const START_MAP_ENV: &str = "RMXP_START_MAP";
+
+fn build_initial_tile_scene(project: &GameProject, db: &GameDatabase) -> Option<TileScene> {
     let system = db.system.as_ref()?;
-    let map_id = system.start_map_id.max(1);
+    let map_id = resolve_start_map_id(system);
     match project.load_map(map_id) {
-        Ok(map) => map_to_tile_view(&map),
+        Ok(map) => {
+            let tileset_entry = match db.tilesets.iter().find(|ts| ts.id == map.tileset_id) {
+                Some(entry) => entry,
+                None => {
+                    warn!(
+                        target: "project",
+                        tileset_id = map.tileset_id,
+                        "No tileset entry for map {}",
+                        map_id
+                    );
+                    return None;
+                }
+            };
+            info!(
+                target: "project",
+                map_id,
+                tileset = %tileset_entry.name,
+                base = %tileset_entry.tileset_name,
+                autotiles = tileset_entry.autotile_names.len(),
+                "Building tile scene"
+            );
+            let tileset = match project.load_tileset_image(&tileset_entry.tileset_name) {
+                Ok(image) => Arc::new(image),
+                    Err(err) => {
+                        warn!(
+                            target: "project",
+                            error = ?err,
+                            tileset = %tileset_entry.tileset_name,
+                            "Failed to load tileset for map {}",
+                            map_id
+                        );
+                        return None;
+                    }
+            };
+            let autotiles = load_autotile_textures(project, &tileset_entry.autotile_names);
+            map_to_tile_scene(&map, tileset, autotiles)
+        }
         Err(err) => {
             warn!(
                 target: "project",
-                error = %err,
+                error = ?err,
                 "Failed to load start map {}",
                 map_id
             );
@@ -157,13 +197,89 @@ fn build_initial_tile_view(project: &GameProject, db: &GameDatabase) -> Option<T
     }
 }
 
-fn map_to_tile_view(map: &MapData) -> Option<TileDebugView> {
+fn resolve_start_map_id(system: &SystemData) -> i32 {
+    if let Ok(value) = env::var(START_MAP_ENV) {
+        match value.trim().parse::<i32>() {
+            Ok(id) if id > 0 => {
+                info!(
+                    target: "project",
+                    override_env = START_MAP_ENV,
+                    map_id = id,
+                    "Using start map override"
+                );
+                return id;
+            }
+            Ok(_) => {
+                warn!(
+                    target: "project",
+                    override_env = START_MAP_ENV,
+                    value = %value,
+                    "Start map override must be positive; falling back to System.rxdata"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    target: "project",
+                    override_env = START_MAP_ENV,
+                    error = %err,
+                    value = %value,
+                    "Failed to parse start map override; falling back to System.rxdata"
+                );
+            }
+        }
+    }
+    system.start_map_id.max(1)
+}
+
+fn load_autotile_textures(project: &GameProject, names: &[String]) -> Vec<Option<AutotileTexture>> {
+    names
+        .iter()
+        .map(|name| {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            match project.load_autotile_image(trimmed) {
+                Ok(image) => {
+                    let arc = Arc::new(image);
+                    Some(AutotileTexture::new(arc))
+                }
+                Err(err) => {
+                    warn!(
+                        target: "project",
+                        autotile = %trimmed,
+                        error = ?err,
+                        "Failed to load autotile"
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn map_to_tile_scene(
+    map: &MapData,
+    tileset: Arc<RgbaImage>,
+    autotiles: Vec<Option<AutotileTexture>>,
+) -> Option<TileScene> {
     let width = map.width.max(1) as usize;
     let height = map.height.max(1) as usize;
-    let tiles = map.data.plane(0)?;
-    Some(TileDebugView {
-        width,
-        height,
-        tiles,
+    let mut layers = Vec::new();
+    for z in 0..map.data.zsize {
+        if let Some(plane) = map.data.plane(z) {
+            layers.push(plane);
+        }
+    }
+    if layers.is_empty() {
+        return None;
+    }
+    Some(TileScene {
+        map_width: width,
+        map_height: height,
+        tile_size: 32,
+        tileset,
+        autotiles,
+        layers,
     })
 }

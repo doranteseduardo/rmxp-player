@@ -19,6 +19,15 @@ pub struct MapInfoEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct TilesetData {
+    pub id: i32,
+    pub name: String,
+    pub tileset_name: String,
+    pub autotile_names: Vec<String>,
+    pub priorities: Option<TableData>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TableData {
     pub xsize: usize,
     pub ysize: usize,
@@ -89,6 +98,43 @@ pub fn parse_map_infos(value: &RubyValue) -> Result<Vec<MapInfoEntry>> {
     Ok(entries)
 }
 
+pub fn parse_tilesets(value: &RubyValue) -> Result<Vec<TilesetData>> {
+    let list = match value {
+        RubyValue::Array(items) => items,
+        _ => return Err(anyhow!("Tilesets value is not an array")),
+    };
+
+    let mut tilesets = Vec::with_capacity(list.len());
+    for entry in list {
+        let obj = match entry {
+            RubyValue::Object(obj) => obj,
+            _ => continue,
+        };
+        let id = obj.get_int("id").unwrap_or(tilesets.len() as i64 + 1) as i32;
+        let name = obj
+            .get_string("name")
+            .unwrap_or_else(|| format!("Tileset {}", id));
+        let tileset_name = obj
+            .get_string("tileset_name")
+            .unwrap_or_else(|| "Tileset".into());
+        let autotile_names = obj
+            .get("autotile_names")
+            .and_then(|value| extract_string_array(value))
+            .unwrap_or_default();
+        let priorities = obj
+            .get("priorities")
+            .and_then(|value| parse_table(value).ok());
+        tilesets.push(TilesetData {
+            id,
+            name,
+            tileset_name,
+            autotile_names,
+            priorities,
+        });
+    }
+    Ok(tilesets)
+}
+
 pub fn parse_map(value: &RubyValue) -> Result<MapData> {
     let obj = match value {
         RubyValue::Object(obj) => obj,
@@ -98,9 +144,10 @@ pub fn parse_map(value: &RubyValue) -> Result<MapData> {
     let width = obj.get_int("width").unwrap_or(0) as i32;
     let height = obj.get_int("height").unwrap_or(0) as i32;
     let tileset_id = obj.get_int("tileset_id").unwrap_or(1) as i32;
-    let data_value = obj
-        .get("data")
-        .ok_or_else(|| anyhow!("map data missing @data table"))?;
+    let data_value = obj.get("data").ok_or_else(|| {
+        let keys: Vec<String> = obj.instance_vars.iter().map(|(k, _)| k.clone()).collect();
+        anyhow!("map data missing @data table (keys: {:?})", keys)
+    })?;
     let data = parse_table(data_value).context("parsing map table")?;
 
     Ok(MapData {
@@ -161,9 +208,27 @@ fn extract_int_array(value: Option<&RubyValue>) -> Option<Vec<i32>> {
     )
 }
 
+fn extract_string_array(value: &RubyValue) -> Option<Vec<String>> {
+    match value {
+        RubyValue::Array(items) => Some(
+            items
+                .iter()
+                .map(|v| match v {
+                    RubyValue::String(s) => s.to_string_lossy(),
+                    RubyValue::Symbol(sym) => sym.clone(),
+                    _ => String::new(),
+                })
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 fn parse_table(value: &RubyValue) -> Result<TableData> {
     match value {
-        RubyValue::UserDefined { class_name, data } if class_name == "Table" => {
+        RubyValue::UserDefined { class_name, data }
+            if class_name == "Table" || class_name.ends_with("::Table") =>
+        {
             parse_table_bytes(data)
         }
         _ => Err(anyhow!("expected Table user-defined value")),

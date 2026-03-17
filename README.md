@@ -42,6 +42,7 @@ RMXP_GAME_PATH=/absolute/path/to/rmxp/game cargo run -p desktop-runner
 Environment variables:
 
 - `RMXP_GAME_PATH` – absolute path to the RMXP project folder (expects `Data/System.rxdata`).
+- `RMXP_START_MAP` – optional override for the map ID to boot (defaults to `System.rxdata` start map).
 - `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
 
 ## Next Steps

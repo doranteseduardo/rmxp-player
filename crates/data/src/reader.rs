@@ -20,6 +20,8 @@ pub enum MarshalError {
     UnexpectedEof,
     #[error("Invalid UTF-8 symbol: {0}")]
     InvalidSymbol(String),
+    #[error("Expected symbol but found {0}")]
+    ExpectedSymbol(String),
 }
 
 pub fn load<R: Read>(reader: R) -> Result<RubyValue, MarshalError> {
@@ -172,6 +174,13 @@ impl<R: Read> MarshalReader<R> {
         }
     }
 
+    fn expect_symbol(&mut self) -> Result<String, MarshalError> {
+        match self.read_value()? {
+            RubyValue::Symbol(sym) => Ok(sym),
+            other => Err(MarshalError::ExpectedSymbol(format!("{:?}", other))),
+        }
+    }
+
     fn read_object_link(&mut self) -> Result<RubyValue, MarshalError> {
         let idx = self.read_long()? as usize;
         match self.objects.get(idx) {
@@ -213,35 +222,31 @@ impl<R: Read> MarshalReader<R> {
         let count = self.read_long()? as usize;
         let mut attrs = Vec::with_capacity(count);
         for _ in 0..count {
-            let key = self.read_symbol()?;
+            let key = self.expect_symbol()?;
             let val = self.read_value()?;
             attrs.push((key, val));
         }
         match value {
             RubyValue::String(ref mut s) => {
                 for (key, val) in attrs {
-                    if let RubyValue::Symbol(sym) = key {
-                        match sym.as_str() {
-                            "E" => {
-                                if matches!(val, RubyValue::True) {
-                                    s.encoding = Some("UTF-8".into());
-                                }
+                    match key.as_str() {
+                        "E" => {
+                            if matches!(val, RubyValue::True) {
+                                s.encoding = Some("UTF-8".into());
                             }
-                            "encoding" => {
-                                if let RubyValue::Symbol(enc) = val {
-                                    s.encoding = Some(enc);
-                                }
-                            }
-                            _ => {}
                         }
+                        "encoding" => {
+                            if let RubyValue::Symbol(enc) = val {
+                                s.encoding = Some(enc);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
             RubyValue::Object(ref mut obj) => {
                 for (key, val) in attrs {
-                    if let RubyValue::Symbol(sym) = key {
-                        obj.instance_vars.push((format!("@{}", sym), val));
-                    }
+                    obj.instance_vars.push((canonical_ivar(&key), val));
                 }
             }
             _ => {}
@@ -260,11 +265,9 @@ impl<R: Read> MarshalReader<R> {
         let len = self.read_long()? as usize;
         let mut instance_vars = Vec::with_capacity(len);
         for _ in 0..len {
-            let key = self.read_symbol()?;
+            let key = self.expect_symbol()?;
             let val = self.read_value()?;
-            if let RubyValue::Symbol(sym) = key {
-                instance_vars.push((format!("@{}", sym), val));
-            }
+            instance_vars.push((canonical_ivar(&key), val));
         }
         let value = RubyValue::Object(RubyObject {
             class_name,
@@ -280,9 +283,13 @@ impl<R: Read> MarshalReader<R> {
             RubyValue::String(s) => s.to_string_lossy(),
             other => format!("{:?}", other),
         };
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
         let len = self.read_long()? as usize;
         let data = self.read_bytes(len)?;
-        Ok(RubyValue::UserDefined { class_name, data })
+        let value = RubyValue::UserDefined { class_name, data };
+        self.objects[idx] = value.clone();
+        Ok(value)
     }
 
     fn read_user_marshal(&mut self) -> Result<RubyValue, MarshalError> {
@@ -291,11 +298,15 @@ impl<R: Read> MarshalReader<R> {
             RubyValue::String(s) => s.to_string_lossy(),
             other => format!("{:?}", other),
         };
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
         let data = self.read_value()?;
-        Ok(RubyValue::UserMarshal {
+        let value = RubyValue::UserMarshal {
             class_name,
             data: Box::new(data),
-        })
+        };
+        self.objects[idx] = value.clone();
+        Ok(value)
     }
 
     fn read_struct(&mut self) -> Result<RubyValue, MarshalError> {
@@ -305,15 +316,17 @@ impl<R: Read> MarshalReader<R> {
             other => format!("{:?}", other),
         };
         let len = self.read_long()? as usize;
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
         let mut members = Vec::with_capacity(len);
         for _ in 0..len {
-            let key = self.read_symbol()?;
+            let key = self.expect_symbol()?;
             let val = self.read_value()?;
-            if let RubyValue::Symbol(sym) = key {
-                members.push((sym, val));
-            }
+            members.push((key, val));
         }
-        Ok(RubyValue::Struct { name, members })
+        let value = RubyValue::Struct { name, members };
+        self.objects[idx] = value.clone();
+        Ok(value)
     }
 
     fn read_extended(&mut self) -> Result<RubyValue, MarshalError> {
@@ -323,10 +336,14 @@ impl<R: Read> MarshalReader<R> {
             other => format!("{:?}", other),
         };
         let object = self.read_value()?;
-        Ok(RubyValue::Extended {
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
+        let value = RubyValue::Extended {
             module_name,
             object: Box::new(object),
-        })
+        };
+        self.objects[idx] = value.clone();
+        Ok(value)
     }
 
     fn read_class(&mut self) -> Result<RubyValue, MarshalError> {
@@ -334,7 +351,11 @@ impl<R: Read> MarshalReader<R> {
         let bytes = self.read_bytes(len)?;
         let name =
             String::from_utf8(bytes).map_err(|err| MarshalError::InvalidSymbol(err.to_string()))?;
-        Ok(RubyValue::Class(name))
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
+        let value = RubyValue::Class(name);
+        self.objects[idx] = value.clone();
+        Ok(value)
     }
 
     fn read_module(&mut self) -> Result<RubyValue, MarshalError> {
@@ -342,13 +363,29 @@ impl<R: Read> MarshalReader<R> {
         let bytes = self.read_bytes(len)?;
         let name =
             String::from_utf8(bytes).map_err(|err| MarshalError::InvalidSymbol(err.to_string()))?;
-        Ok(RubyValue::Module(name))
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
+        let value = RubyValue::Module(name);
+        self.objects[idx] = value.clone();
+        Ok(value)
     }
 
     fn read_regexp(&mut self) -> Result<RubyValue, MarshalError> {
         let len = self.read_long()? as usize;
         let pattern = self.read_bytes(len)?;
         let flags = self.read_byte()?;
-        Ok(RubyValue::Regexp { pattern, flags })
+        let idx = self.objects.len();
+        self.objects.push(RubyValue::Nil);
+        let value = RubyValue::Regexp { pattern, flags };
+        self.objects[idx] = value.clone();
+        Ok(value)
+    }
+}
+
+fn canonical_ivar(name: &str) -> String {
+    if name.starts_with('@') {
+        name.to_string()
+    } else {
+        format!("@{}", name)
     }
 }

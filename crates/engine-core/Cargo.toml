@@ -15,3 +15,4 @@ rgss-bindings = { path = "../rgss-bindings" }
 rmxp-data = { path = "../data" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+image = { workspace = true }
