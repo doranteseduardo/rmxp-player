@@ -42,6 +42,17 @@ pub struct TileScene {
     pub tileset: Arc<RgbaImage>,
     pub autotiles: Vec<Option<AutotileTexture>>,
     pub layers: Vec<Vec<i16>>,
+    pub priorities: Vec<u8>,
+}
+
+impl TileScene {
+    fn tile_priority(&self, tile_id: i16) -> u8 {
+        if tile_id < 0 {
+            return 0;
+        }
+        let index = tile_id as usize;
+        self.priorities.get(index).copied().unwrap_or(0)
+    }
 }
 
 impl<'a> Renderer<'a> {
@@ -113,8 +124,8 @@ fn draw_tile_scene(scene: &TileScene, size: (u32, u32), frame: &mut [u8]) {
             let tile_y = map_y / scene.tile_size;
             let local_x = map_x % scene.tile_size;
             let local_y = map_y % scene.tile_size;
-            let mut color = [0, 0, 0, 0];
-            let mut drew = false;
+            let mut ground = [0, 0, 0, 0];
+            let mut overlay = [0, 0, 0, 0];
             for layer in &scene.layers {
                 let idx = tile_y * scene.map_width + tile_x;
                 if idx >= layer.len() {
@@ -128,14 +139,20 @@ fn draw_tile_scene(scene: &TileScene, size: (u32, u32), frame: &mut [u8]) {
                 if sample[3] == 0 {
                     continue;
                 }
-                blend_pixel(&mut color, sample);
-                drew = true;
+                let priority = scene.tile_priority(tile_id);
+                if priority == 0 {
+                    blend_pixel(&mut ground, sample);
+                } else {
+                    blend_pixel(&mut overlay, sample);
+                }
             }
-            let final_color = if drew {
-                color
-            } else {
-                debug_pixel(x, y, width)
-            };
+            let mut final_color = ground;
+            if overlay[3] > 0 {
+                blend_pixel(&mut final_color, overlay);
+            }
+            if final_color[3] == 0 {
+                final_color = debug_pixel(x, y, width);
+            }
             let offset = (y * width + x) * 4;
             frame[offset..offset + 4].copy_from_slice(&final_color);
         }

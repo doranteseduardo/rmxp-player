@@ -15,9 +15,9 @@
   that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
 - Engine now parses the start map and feeds a color-coded tileview into the
   renderer so we can visualize real `.rxdata` content end-to-end.
-- Renderer now loads both the B–E tileset sheet and referenced autotiles,
-  then composites every map layer (A + B–E) with rudimentary alpha blending so
-  multi-layer maps show all decorations instead of just the ground.
+- Renderer now loads both the B–E tileset sheet and referenced autotiles, then
+  composites every map layer (A + B–E) obeying the tileset's RGSS priority table
+  so upper-layer decorations draw above the ground layer.
 
 ## 🚧 Immediate Goals
 

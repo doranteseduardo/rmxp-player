@@ -183,7 +183,18 @@ fn build_initial_tile_scene(project: &GameProject, db: &GameDatabase) -> Option<
                     }
             };
             let autotiles = load_autotile_textures(project, &tileset_entry.autotile_names);
-            map_to_tile_scene(&map, tileset, autotiles)
+            let priorities = tileset_entry
+                .priorities
+                .as_ref()
+                .map(|table| {
+                    table
+                        .values
+                        .iter()
+                        .map(|v| (*v).clamp(0, 6) as u8)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            map_to_tile_scene(&map, tileset, autotiles, priorities)
         }
         Err(err) => {
             warn!(
@@ -262,6 +273,7 @@ fn map_to_tile_scene(
     map: &MapData,
     tileset: Arc<RgbaImage>,
     autotiles: Vec<Option<AutotileTexture>>,
+    priorities: Vec<u8>,
 ) -> Option<TileScene> {
     let width = map.width.max(1) as usize;
     let height = map.height.max(1) as usize;
@@ -281,5 +293,6 @@ fn map_to_tile_scene(
         tileset,
         autotiles,
         layers,
+        priorities,
     })
 }
