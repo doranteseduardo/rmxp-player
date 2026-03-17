@@ -1,0 +1,16 @@
+[package]
+name = "engine-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+winit = { workspace = true }
+winit_input_helper = { workspace = true }
+render = { path = "../render" }
+audio = { path = "../audio" }
+platform = { path = "../platform" }
+rgss-bindings = { path = "../rgss-bindings" }
+serde = { workspace = true }
+serde_json = { workspace = true }

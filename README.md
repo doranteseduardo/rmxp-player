@@ -1,61 +1,50 @@
-# RMXP Game Player (Rust + Tauri + PixiJS)
+# RMXP Native Player (Rust)
 
-A modern, open-source reimplementation of the RPG Maker XP (RMXP) engine, built with **Tauri v2** (Rust backend) and **PixiJS** (high-performance WebGL renderer).
+Ground-up reimplementation of the RPG Maker XP runtime using a native Rust stack.
+The project is organized as a Cargo workspace with focused crates for the core
+engine, rendering, audio, platform utilities, RGSS bindings, and future mobile shells.
 
-This project aims to allow RMXP games (like *Pokémon Essentials*) to be played on modern operating systems without relying on the original Ruby interpreter (RGSS). Instead, game logic is being ported to Rust/TypeScript, and assets are loaded natively.
+## Current Status
 
-## 🚀 Features
+- ✅ Workspace scaffolding with crates for `engine-core`, `render`, `audio`,
+  `platform`, `rgss-bindings`, `mobile-shell`, and `desktop-runner` binary.
+- ✅ Winit + Pixels desktop loop rendering a placeholder gradient.
+- ✅ Rodio audio backend initialization stub.
+- ✅ Platform helper for config directories and logging bootstrap.
+- 🚧 Pending: real RGSS embedding, map renderer, input mapping, event system,
+  audio playback, save/load, and mobile launchers.
 
-- **No Ruby Dependency**: Custom Rust-based parser (`marshal`) for reading compiled Ruby `.rxdata` files directly.
-- **Cross-Platform**: Windows, macOS, and Linux support via Tauri.
-- **High Performance**: 
-  - **Rust Backend**: Handles file I/O, audio decoding, and heavy computation.
-  - **PixiJS Frontend**: Hardware-accelerated 2D rendering for maps and sprites.
-- **Audio Engine**: 
-  - Supports standard formats (OGG, MP3, WAV) via `rodio`.
-  - **Native MIDI Support**: Integrated `rustysynth` SoundFont synthesizer to play RMXP's default `.mid` BGM files without external drivers.
+## Project Layout
 
-## 🛠 Tech Stack
+```
+Cargo.toml
+apps/
+  desktop-runner/      # Binary that boots the engine for desktop platforms
+crates/
+  engine-core/         # Event loop, scheduler skeleton, integration glue
+  render/              # Pixels-based renderer abstraction
+  audio/               # Rodio/CPAL audio system stub
+  platform/            # Config directories, logging, persistence helpers
+  rgss-bindings/       # Placeholder Ruby/RGSS bridge
+  mobile-shell/        # Future iOS/Android launch helpers
+```
 
-- **Backend**: Rust (Tauri, Rodio, Rustysynth, Midly)
-- **Frontend**: React 19, TypeScript, PixiJS v8
-- **Build Tool**: Vite
+## Running (Desktop)
 
-## 📦 Installation & Setup
+```bash
+cargo run -p desktop-runner
+```
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+)
-- [Rust](https://www.rust-lang.org/) (latest stable)
+Environment variables:
 
-### Getting Started
+- `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
 
-1.  **Install dependencies**:
-    ```bash
-    npm install
-    ```
+## Next Steps
 
-2.  **Run in Development Mode**:
-    ```bash
-    npm run tauri dev
-    ```
-    This will compile the Rust backend and launch the application window with Hot Module Replacement (HMR) for the frontend.
-
-## 📂 Project Structure
-
-- `src-tauri/src/marshal/`: Custom implementation of Ruby's `Marshal` format parser.
-- `src-tauri/src/commands/`: Tauri commands for Audio, File System, etc.
-- `src/`: Frontend React application.
-- `src/utils/`: Helper classes (e.g., `Table` for 3D arrays).
-
-## ⚠️ Current Status
-
-This is a **Work In Progress**. 
-- ✅ Data Loading (System, Actors, etc.)
-- ✅ Audio Playback (BGM/SE/MIDI)
-- 🚧 Map Rendering
-- 🚧 Event System
-- 🚧 Player Movement
-
-## 📄 License
-
-MIT
+1. Flesh out `rgss-bindings` with embedded Ruby MRI bootstrap and native class
+   shims for RGSS.
+2. Replace the placeholder gradient renderer with tilemap/sprite rendering backed
+   by real RMXP assets.
+3. Implement resource loading, filesystem abstractions, and project selection UI.
+4. Expand `platform` crate for mobile-safe paths and asynchronous file pickers.
+5. Add mobile shells (Swift/Kotlin) leveraging the shared Rust engine via winit.

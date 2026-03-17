@@ -1,52 +1,28 @@
 # Development Progress
 
-## ✅ Completed Logic
+## ✅ Bootstrapped
 
-### Backend (Rust / Tauri)
+- Workspace migrated to a multi-crate layout (`engine-core`, `render`, `audio`,
+  `platform`, `rgss-bindings`, `mobile-shell`, `desktop-runner`).
+- Desktop runner crate launches a winit event loop and renders a placeholder
+  frame via the shared renderer abstraction.
+- Audio subsystem initializes the default rodio output stream (no playback yet).
+- Platform helper configures config/save directories and installs `tracing`
+  logging with `RMXP_LOG` filtering.
+- RGSS bindings crate contains a stub `RubyVm` placeholder for the future MRI
+  embedding layer.
 
-- **Project Structure**: Initialized Tauri + React + Vite workspace.
-- **Data Parsing (`src-tauri/src/marshal/`)**:
-  - Implemented a custom parser for Ruby's `.rxdata` (Marshal v4.8) format.
-  - Successfully parses `System.rxdata`, `Map*.rxdata`, and other core database files.
-  - Converts intricate Ruby objects (like `Table`, `Color`, `Tone`) into JSON-compatible structures for the frontend.
-- **Audio Engine (`src-tauri/src/commands/audio.rs`)**:
-  - Built a dedicated audio thread using `rodio`.
-  - Supports standard audio formats: `.ogg`, `.mp3`, `.wav`.
-  - **MIDI Support**: Integrated `rustysynth` and `midly` to synthesize `.mid` files using a SoundFont (`soundfont.sf2`), enabling playback of original RMXP BGM.
-- **File System Access**:
-  - Configured Tauri permissions to allow reading game directories.
-  - `load_data` command securely reads and parses `.rxdata` files.
+## 🚧 Immediate Goals
 
-### Frontend (React / TypeScript)
-
-- **UI Skeleton**: Basic file picker to select a game folder.
-- **Data Bridge**: `App.tsx` invokes backend commands to load system data.
-- **Audio Control**: Successfully plays BGM upon loading a project, respecting volume settings.
-- **Utilities**: Created `Table.ts` to handle RMXP's 3D array structure (x, y, z) in TypeScript.
-
-## 🚧 In Progress
-
-- **Map Rendering**:
-  - Re-integrating **PixiJS** for high-performance 2D rendering.
-  - Need to implement a `Tilemap` renderer that consumes the `Table` data and draws the correct tiles from `Graphics/Tilesets`.
-- **Game Loop**:
-  - Establishing a fixed timestep loop for game logic (updates) vs. rendering (draws).
-
-## 📝 Planned Features
-
-### Core Engine
-
-1.  **Sprite Rendering**: Displaying events (NPCs) and the player character.
-2.  **Input Handling**: Mapping keyboard inputs (Arrow keys, Z, X, Shift) to game actions.
-3.  **Collision Detection**: Implementing the passability logic (tile priorities, directional passability).
-4.  **Event Interpreter**: A TypeScript implementation of the event command list (Map events, Common events).
-
-### UI / HUD
-
-- **Window System**: Porting the `Window_Base` logic to React/PixiJS (message boxes, menus).
-- **Scene Management**: Switching between Title, Map, Menu, and Battle scenes.
-
-### Polish
-
-- **Save/Load**: Serializing game state back to `.rxdata` or a custom JSON save format.
-- **Audio Effects**: Implementing BGS (Background Sounds), ME (Music Effects), and SE (Sound Effects) with pitch/pan support.
+1. **Resource & Data Pipeline** – port the Marshal reader + typed models and wire
+   them into the engine loading path.
+2. **Rendering Roadmap** – replace the gradient with tilemap + sprite batching
+   using actual RMXP assets and Table data.
+3. **Input & Loop** – encode fixed-timestep scheduling, keyboard/gamepad/touch
+   mapping, and state machines for player movement.
+4. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fading, looping,
+   and MIDI via `rustysynth`.
+5. **RGSS Integration** – embed Ruby MRI, expose RGSS classes, and drive the
+   scene stack via scripts.
+6. **Mobile Shells** – add Swift/Kotlin launchers that delegate to the shared
+   Rust engine.

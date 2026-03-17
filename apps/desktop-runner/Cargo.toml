@@ -1,0 +1,8 @@
+[package]
+name = "desktop-runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-core = { path = "../../crates/engine-core" }
+anyhow = { workspace = true }

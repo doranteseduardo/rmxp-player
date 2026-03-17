@@ -1,0 +1,9 @@
+[package]
+name = "mobile-shell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+anyhow = { workspace = true }
+tracing = { workspace = true }
