@@ -22,9 +22,13 @@
   and reuse Ruby `Marshal`, so vanilla scripts can read/write `.rxdata` without
   touching the Rust side.
 - Graphics/Bitmap built-ins now run natively: `Bitmap#blt`, `Bitmap#fill_rect`,
-  `Bitmap#get_pixel`/`set_pixel`, `Bitmap#clear`, and `Graphics.snap_to_bitmap`
-  manipulate the same textures the renderer consumes, while script-level Cache
-  logic is left entirely to project `Scripts.rxdata`.
+  `Bitmap#get_pixel`/`set_pixel`, `Bitmap#clear`, plus `Graphics.freeze`,
+  `Graphics.snap_to_bitmap`, and the tone/brightness/flash pipeline manipulate
+  the same textures the renderer consumes, while script-level Cache logic is
+  left entirely to project `Scripts.rxdata`.
+- `Bitmap#stretch_blt`, `Bitmap#gradient_fill_rect`, and `Bitmap#draw_text` now
+  render through a built-in 8×8 ASCII font so the standard RMXP windows and UI
+  code can draw text/gradients without modification.
 - Added `rmxp-data` crate with a Marshal reader/JSON bridge plus engine wiring
   that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
 - Engine now parses the start map and feeds a rendered tile scene (tileset +
@@ -34,15 +38,20 @@
 - Desktop runner hosts a fixed 60 Hz loop with keyboard input (arrows/WASD),
   pixel-perfect camera scroll (640×480 viewport), and a placeholder player
   marker to visualize movement on real maps.
+- RGSS viewports, sprites, planes, and windows now composite directly in the
+  renderer (viewport clipping, sprite zoom/angle/mirror, tone/color overlays,
+  plane tiling, windowskin/background/contents/cursor rendering), enabling
+  vanilla `Scripts.rxdata` scenes to drive the entire frame without native
+  stubs.
 
 ## 🚧 Immediate Goals
 
-1. **Scene Loop Integration** – execute `Scripts.rxdata`, drive the scene stack,
-   and surface characters/windows via the renderer (now that tilemaps, planes,
-   and sprites sync from Ruby).
-2. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fades, loop
-   points, and MIDI via `rustysynth`.
-3. **Event/Interpreter Core** – implement Game_Map/Game_Player logic hooked to
-   passability, event triggers, and script callbacks.
+1. **Scene Loop Integration** – execute `Scripts.rxdata`, drive the RGSS scene
+   stack (Game_Map/Game_Player/Game_Interpreter), and let Ruby advance maps,
+   characters, and UI transitions end-to-end.
+2. **Audio Playback** – wire RGSS `Audio.*` calls to the rodio/CPAL backend with
+   fades, loop points, and MIDI via `rustysynth`.
+3. **Event/Interpreter Core** – implement map passability, event triggers,
+   message windows, and script callbacks so vanilla events run unchanged.
 4. **Persistence & Mobile Shells** – add save slots/config, then wire Swift/
    Kotlin launchers that reuse the Rust core on iOS/Android.

@@ -20,8 +20,14 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
   mirrors Bitmap/Viewport/Sprite/Window/Plane/Tilemap classes so Ruby owns scene
   objects while Rust keeps authoritative state for rendering.
 - ✅ Core Graphics/Bitmap APIs are backed by native code: `Bitmap#blt`,
-  `Bitmap#fill_rect`, `Bitmap#get_pixel`/`set_pixel`, and `Graphics.snap_to_bitmap`
-  all operate on shared GPU-ready textures pulled straight from the renderer.
+  `Bitmap#fill_rect`, `Bitmap#get_pixel`/`set_pixel`, `Graphics.freeze`, and
+  `Graphics.snap_to_bitmap` all operate on shared GPU-ready textures pulled
+  straight from the renderer.
+- ✅ Graphics tone/brightness/flash now feed into the renderer, so screen-wide
+  fades and flashes from vanilla RGSS scripts show up without further stubs.
+- ✅ `Bitmap#stretch_blt`, `Bitmap#gradient_fill_rect`, and `Bitmap#draw_text`/
+  `text_size` work end-to-end (via an embedded 8×8 ASCII font), covering the
+  rendering needs of the default RGSS windowing stack.
 - ✅ Kernel helpers (`load_data`, `save_data`, `data_exist?`) resolve paths
   against the active project root so vanilla RGSS scripts can Marshal `.rxdata`
   content without any changes.
@@ -30,9 +36,12 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 - ✅ Tilemap data written by real RGSS scripts (tileset, autotiles, priorities,
   scroll offsets) now feeds the renderer, so Ruby code controls which map is
   displayed instead of the fixed `.rxdata` bootstrap scene.
-- 🚧 Next: wire native RGSS state into the renderer (sprites/windows), implement
-  audio channels, drive the scene stack from real scripts, add persistence, and
-  stand up iOS/Android shells.
+- ✅ RGSS viewports, sprites, planes, and windows now render natively with
+  viewport clipping, sprite zoom/angle/mirror, plane tiling, and full
+  windowskin/background/contents/cursor compositing, so vanilla scripts drive
+  the complete scene graph without engine-side stubs.
+- 🚧 Next: execute RGSS scene stacks (map/player/events), hook RGSS `Audio.*`
+  to the native mixer, add save/config flows, and stand up the mobile shells.
 
 ## Project Layout
 

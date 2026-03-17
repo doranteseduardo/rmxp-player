@@ -27,8 +27,8 @@ pub use input::{
     BUTTON_RIGHT, BUTTON_UP,
 };
 pub use native::{
-    bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, BitmapData, PlaneData,
-    SpriteData, TilemapData,
+    bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, viewport_snapshot,
+    window_snapshot, BitmapData, PlaneData, SpriteData, TilemapData, ViewportData, WindowData,
 };
 
 pub fn set_project_root(path: &Path) {
@@ -39,7 +39,7 @@ pub fn sync_graphics_size(width: u32, height: u32) {
     graphics::set_screen_size(width, height);
 }
 
-pub use graphics::store_backbuffer;
+pub use graphics::{screen_effects, store_backbuffer, ScreenEffects};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NativeSnapshot {

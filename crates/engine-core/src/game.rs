@@ -1,36 +1,47 @@
 use crate::input::InputState;
 use image::RgbaImage;
-use render::{AutotileTexture, Camera, PlayerMarker, RenderFrame, SpriteInstance, TileScene};
-use rgss_bindings::{bitmap_snapshot, sprite_snapshot, tilemap_snapshot, TilemapData};
+use render::{
+    AutotileTexture, Camera, ClipRect, FallbackScene, PlaneInstance, PlayerMarker, RenderFrame,
+    SpriteInstance, TileScene, TilemapInstance, WindowInstance,
+};
+use rgss_bindings::{
+    bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, viewport_snapshot,
+    window_snapshot, TilemapData,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 const PLAYER_SPEED_TILES_PER_SEC: f32 = 4.0;
+const WINDOW_PADDING: i32 = 16;
 
 pub struct GameState {
-    scene: Option<TileScene>,
+    fallback_scene: Option<TileScene>,
     player: GamePlayer,
     player_color: [u8; 4],
-    viewport: (u32, u32),
+    screen_size: (u32, u32),
+    tilemaps: Vec<TilemapInstance>,
     sprites: Vec<SpriteInstance>,
-    override_origin: Option<(f32, f32)>,
+    planes: Vec<PlaneInstance>,
+    windows: Vec<WindowInstance>,
 }
 
 impl GameState {
     pub fn new(scene: Option<TileScene>, start: (f32, f32), viewport: (u32, u32)) -> Self {
         Self {
-            scene,
+            fallback_scene: scene,
             player: GamePlayer::new(start),
             player_color: [0, 255, 255, 180],
-            viewport,
+            screen_size: viewport,
+            tilemaps: Vec::new(),
             sprites: Vec::new(),
-            override_origin: None,
+            planes: Vec::new(),
+            windows: Vec::new(),
         }
     }
 
     pub fn update(&mut self, dt: Duration, input: &InputState) {
-        if let Some(scene) = self.scene.as_ref() {
+        if let Some(scene) = self.fallback_scene.as_ref() {
             self.player
                 .update(dt, input, scene.map_width, scene.map_height);
         }
@@ -38,20 +49,29 @@ impl GameState {
 
     pub fn render_frame(&mut self) -> Option<RenderFrame<'_>> {
         let textures = self.collect_textures();
-        self.sync_scene_from_tilemap(&textures);
-        let scene_ptr = self.scene.as_ref()? as *const TileScene;
-        let camera = if let Some(origin) = self.override_origin {
-            Camera { origin }
-        } else {
-            self.camera(unsafe { &*scene_ptr })
-        };
-        self.rebuild_rgss_sprites(&textures, &camera);
-        let scene = unsafe { &*scene_ptr };
-        Some(RenderFrame {
+        self.rebuild_rgss_state(&textures);
+        if self.has_rgss_frame() {
+            return Some(RenderFrame {
+                tilemaps: &self.tilemaps,
+                planes: &self.planes,
+                sprites: &self.sprites,
+                windows: &self.windows,
+                fallback: None,
+            });
+        }
+        let scene = self.fallback_scene.as_ref()?;
+        let fallback = FallbackScene {
             scene,
-            camera,
+            camera: self.camera(scene),
             player_marker: self.player_marker(),
-            sprites: &self.sprites,
+            sprites: &[],
+        };
+        Some(RenderFrame {
+            tilemaps: &[],
+            planes: &[],
+            sprites: &[],
+            windows: &[],
+            fallback: Some(fallback),
         })
     }
 
@@ -59,8 +79,8 @@ impl GameState {
         let tile_px = scene.tile_size as f32;
         let map_px_w = scene.map_width as f32 * tile_px;
         let map_px_h = scene.map_height as f32 * tile_px;
-        let viewport_w = self.viewport.0 as f32;
-        let viewport_h = self.viewport.1 as f32;
+        let viewport_w = self.screen_size.0 as f32;
+        let viewport_h = self.screen_size.1 as f32;
         let player_center_x = (self.player.position.0 + 0.5) * tile_px;
         let player_center_y = (self.player.position.1 + 0.5) * tile_px;
         let max_x = (map_px_w - viewport_w).max(0.0);
@@ -72,51 +92,282 @@ impl GameState {
         }
     }
 
-    fn rebuild_rgss_sprites(&mut self, textures: &HashMap<u32, Arc<RgbaImage>>, camera: &Camera) {
+    fn rebuild_rgss_state(&mut self, textures: &HashMap<u32, Arc<RgbaImage>>) {
+        self.tilemaps.clear();
         self.sprites.clear();
+        self.planes.clear();
+        self.windows.clear();
+        let viewport_map = self.collect_viewports();
+        let default_viewport = ViewportInfo::default(self.screen_size);
+        self.collect_tilemaps(textures, &viewport_map, &default_viewport);
+        self.collect_planes(textures, &viewport_map, &default_viewport);
+        self.collect_sprites(textures, &viewport_map, &default_viewport);
+        self.collect_windows(textures, &viewport_map, &default_viewport);
+        self.tilemaps.sort_by_key(|tm| tm.z);
+        self.planes.sort_by_key(|pl| pl.z);
+        self.sprites.sort_by_key(|sp| sp.z);
+        self.windows.sort_by_key(|w| w.z);
+    }
+
+    fn collect_viewports(&self) -> HashMap<u32, ViewportInfo> {
+        viewport_snapshot()
+            .into_iter()
+            .map(|(id, data)| {
+                let clip = ClipRect::new(
+                    data.rect.x,
+                    data.rect.y,
+                    data.rect.width.max(0) as u32,
+                    data.rect.height.max(0) as u32,
+                );
+                let info = ViewportInfo {
+                    rect: clip,
+                    ox: data.ox as f32,
+                    oy: data.oy as f32,
+                    z: data.z,
+                    visible: data.visible && !data.disposed,
+                };
+                (id, info)
+            })
+            .collect()
+    }
+
+    fn collect_tilemaps(
+        &mut self,
+        textures: &HashMap<u32, Arc<RgbaImage>>,
+        viewports: &HashMap<u32, ViewportInfo>,
+        default_viewport: &ViewportInfo,
+    ) {
+        for (_id, tilemap) in tilemap_snapshot() {
+            if tilemap.disposed || !tilemap.visible {
+                continue;
+            }
+            let Some(scene) = self.scene_from_tilemap(&tilemap, textures) else {
+                continue;
+            };
+            let viewport = tilemap
+                .viewport_id
+                .and_then(|id| viewports.get(&id))
+                .unwrap_or(default_viewport);
+            if !viewport.visible {
+                continue;
+            }
+            let clip = viewport
+                .rect
+                .clamp(self.screen_size)
+                .unwrap_or_else(|| ClipRect::new(0, 0, self.screen_size.0, self.screen_size.1));
+            let camera = Camera {
+                origin: (
+                    tilemap.ox as f32 + viewport.ox,
+                    tilemap.oy as f32 + viewport.oy,
+                ),
+            };
+            self.tilemaps.push(TilemapInstance {
+                scene,
+                camera,
+                clip,
+                z: viewport.z,
+            });
+        }
+    }
+
+    fn collect_planes(
+        &mut self,
+        textures: &HashMap<u32, Arc<RgbaImage>>,
+        viewports: &HashMap<u32, ViewportInfo>,
+        default_viewport: &ViewportInfo,
+    ) {
+        for (_id, plane) in plane_snapshot() {
+            if plane.disposed || !plane.visible {
+                continue;
+            }
+            let Some(bitmap) = plane.bitmap_id.and_then(|id| textures.get(&id).cloned()) else {
+                continue;
+            };
+            let viewport = plane
+                .viewport_id
+                .and_then(|id| viewports.get(&id))
+                .unwrap_or(default_viewport);
+            if !viewport.visible {
+                continue;
+            }
+            let clip = viewport
+                .rect
+                .clamp(self.screen_size)
+                .unwrap_or_else(|| ClipRect::new(0, 0, self.screen_size.0, self.screen_size.1));
+            self.planes.push(PlaneInstance {
+                texture: bitmap,
+                clip,
+                scroll: (
+                    plane.ox as f32 + viewport.ox,
+                    plane.oy as f32 + viewport.oy,
+                ),
+                zoom: (plane.zoom_x.max(0.0), plane.zoom_y.max(0.0)),
+                opacity: plane.opacity.clamp(0, 255) as u8,
+                blend_type: plane.blend_type.clamp(0, 2) as u8,
+                tone: [plane.tone.red, plane.tone.green, plane.tone.blue, plane.tone.gray],
+                color: [
+                    plane.color.red,
+                    plane.color.green,
+                    plane.color.blue,
+                    plane.color.alpha,
+                ],
+                z: viewport.z.saturating_mul(1000).saturating_add(plane.z),
+            });
+        }
+    }
+
+    fn collect_sprites(
+        &mut self,
+        textures: &HashMap<u32, Arc<RgbaImage>>,
+        viewports: &HashMap<u32, ViewportInfo>,
+        default_viewport: &ViewportInfo,
+    ) {
         for (_id, sprite) in sprite_snapshot() {
             if sprite.disposed || !sprite.visible {
                 continue;
             }
-            let Some(bitmap_id) = sprite.bitmap_id else {
+            let Some(bitmap) = sprite.bitmap_id.and_then(|id| textures.get(&id).cloned()) else {
                 continue;
             };
-            let Some(texture) = textures.get(&bitmap_id).cloned() else {
-                continue;
-            };
-            let opacity = sprite.opacity.clamp(0, 255) as u8;
-            if opacity == 0 {
+            let viewport = sprite
+                .viewport_id
+                .and_then(|id| viewports.get(&id))
+                .unwrap_or(default_viewport);
+            if !viewport.visible {
                 continue;
             }
-            let src_w = if sprite.src_rect.width > 0 {
-                sprite.src_rect.width.max(0) as u32
-            } else {
-                texture.width()
-            };
-            let src_h = if sprite.src_rect.height > 0 {
-                sprite.src_rect.height.max(0) as u32
-            } else {
-                texture.height()
-            };
-            if src_w == 0 || src_h == 0 {
+            let clip = viewport
+                .rect
+                .clamp(self.screen_size)
+                .unwrap_or_else(|| ClipRect::new(0, 0, self.screen_size.0, self.screen_size.1));
+            if clip.width == 0 || clip.height == 0 {
                 continue;
             }
             let src_x = sprite.src_rect.x.max(0) as u32;
             let src_y = sprite.src_rect.y.max(0) as u32;
-            let world_x = sprite.x - sprite.ox;
-            let world_y = sprite.y - sprite.oy;
-            let screen_x = world_x - camera.origin.0;
-            let screen_y = world_y - camera.origin.1;
-            let instance = SpriteInstance {
-                texture,
-                screen_pos: (screen_x.round() as i32, screen_y.round() as i32),
-                src_rect: (src_x, src_y, src_w, src_h),
-                opacity,
-                z: sprite.z,
+            let src_w = if sprite.src_rect.width > 0 {
+                sprite.src_rect.width.max(0) as u32
+            } else {
+                bitmap.width()
             };
-            self.sprites.push(instance);
+            let src_h = if sprite.src_rect.height > 0 {
+                sprite.src_rect.height.max(0) as u32
+            } else {
+                bitmap.height()
+            };
+            if src_w == 0 || src_h == 0 {
+                continue;
+            }
+            let position = (
+                viewport.rect.x as f32 + (sprite.x - viewport.ox),
+                viewport.rect.y as f32 + (sprite.y - viewport.oy),
+            );
+            let pivot = (
+                sprite.ox as f32 - src_x as f32,
+                sprite.oy as f32 - src_y as f32,
+            );
+            self.sprites.push(SpriteInstance {
+                texture: bitmap,
+                src_rect: (src_x, src_y, src_w, src_h),
+                origin: pivot,
+                position,
+                opacity: sprite.opacity.clamp(0, 255) as u8,
+                z: viewport.z.saturating_mul(1000).saturating_add(sprite.z),
+                scale: (sprite.zoom_x, sprite.zoom_y),
+                angle: sprite.angle,
+                mirror: sprite.mirror,
+                tone: [sprite.tone.red, sprite.tone.green, sprite.tone.blue, sprite.tone.gray],
+                color: [
+                    sprite.color.red,
+                    sprite.color.green,
+                    sprite.color.blue,
+                    sprite.color.alpha,
+                ],
+                blend_type: sprite.blend_type.clamp(0, 2) as u8,
+                bush_depth: sprite.bush_depth.max(0) as u32,
+                clip,
+            });
         }
-        self.sprites.sort_by_key(|sprite| sprite.z);
+    }
+
+    fn collect_windows(
+        &mut self,
+        textures: &HashMap<u32, Arc<RgbaImage>>,
+        viewports: &HashMap<u32, ViewportInfo>,
+        default_viewport: &ViewportInfo,
+    ) {
+        for (_id, window) in window_snapshot() {
+            if window.disposed || !window.visible {
+                continue;
+            }
+            let viewport = window
+                .viewport_id
+                .and_then(|id| viewports.get(&id))
+                .unwrap_or(default_viewport);
+            if !viewport.visible {
+                continue;
+            }
+            let clip = viewport
+                .rect
+                .clamp(self.screen_size)
+                .unwrap_or_else(|| ClipRect::new(0, 0, self.screen_size.0, self.screen_size.1));
+            if clip.width == 0 || clip.height == 0 {
+                continue;
+            }
+            let frame_rect = ClipRect::new(
+                viewport.rect.x + window.x,
+                viewport.rect.y + window.y,
+                window.width.max(0) as u32,
+                window.height.max(0) as u32,
+            );
+            if frame_rect.width == 0 || frame_rect.height == 0 {
+                continue;
+            }
+            let visible_rect = match apply_openness(frame_rect, window.openness)
+                .intersect(&clip)
+                .and_then(|rect| rect.clamp(self.screen_size))
+            {
+                Some(rect) => rect,
+                None => continue,
+            };
+            let windowskin = window
+                .windowskin_id
+                .and_then(|id| textures.get(&id).cloned());
+            let contents = window
+                .contents_id
+                .and_then(|id| textures.get(&id).cloned());
+            let cursor_rect = if window.cursor_rect.width > 0 && window.cursor_rect.height > 0 {
+                Some(ClipRect::new(
+                    frame_rect.x + WINDOW_PADDING + window.cursor_rect.x,
+                    frame_rect.y + WINDOW_PADDING + window.cursor_rect.y,
+                    window.cursor_rect.width.max(0) as u32,
+                    window.cursor_rect.height.max(0) as u32,
+                ))
+            } else {
+                None
+            };
+            self.windows.push(WindowInstance {
+                frame_rect,
+                visible_rect,
+                clip,
+                windowskin,
+                contents,
+                contents_origin: (window.ox, window.oy),
+                opacity: window.opacity.clamp(0, 255) as u8,
+                back_opacity: window.back_opacity.clamp(0, 255) as u8,
+                contents_opacity: window.contents_opacity.clamp(0, 255) as u8,
+                tone: [window.tone.red, window.tone.green, window.tone.blue, window.tone.gray],
+                color: [
+                    window.color.red,
+                    window.color.green,
+                    window.color.blue,
+                    window.color.alpha,
+                ],
+                cursor_rect,
+                cursor_active: window.active || window.pause,
+                z: viewport.z.saturating_mul(1000).saturating_add(window.z),
+            });
+        }
     }
 
     fn collect_textures(&self) -> HashMap<u32, Arc<RgbaImage>> {
@@ -127,19 +378,11 @@ impl GameState {
             .collect()
     }
 
-    fn sync_scene_from_tilemap(&mut self, textures: &HashMap<u32, Arc<RgbaImage>>) {
-        let tilemaps = tilemap_snapshot();
-        for (_id, tilemap) in tilemaps {
-            if tilemap.disposed || !tilemap.visible {
-                continue;
-            }
-            if let Some(scene) = self.scene_from_tilemap(&tilemap, textures) {
-                self.scene = Some(scene);
-                self.override_origin = Some((tilemap.ox as f32, tilemap.oy as f32));
-                return;
-            }
-        }
-        self.override_origin = None;
+    fn has_rgss_frame(&self) -> bool {
+        !(self.tilemaps.is_empty()
+            && self.planes.is_empty()
+            && self.sprites.is_empty()
+            && self.windows.is_empty())
     }
 
     fn scene_from_tilemap(
@@ -180,14 +423,10 @@ impl GameState {
     }
 
     fn player_marker(&self) -> Option<PlayerMarker> {
-        if self.override_origin.is_some() {
-            None
-        } else {
-            Some(PlayerMarker {
-                tile_pos: self.player.position,
-                color: self.player_color,
-            })
-        }
+        Some(PlayerMarker {
+            tile_pos: self.player.position,
+            color: self.player_color,
+        })
     }
 }
 
@@ -223,4 +462,41 @@ impl GamePlayer {
         y = y.clamp(0.0, max_y);
         self.position = (x, y);
     }
+}
+
+#[derive(Clone, Copy)]
+struct ViewportInfo {
+    rect: ClipRect,
+    ox: f32,
+    oy: f32,
+    z: i32,
+    visible: bool,
+}
+
+impl ViewportInfo {
+    fn default(screen: (u32, u32)) -> Self {
+        Self {
+            rect: ClipRect::new(0, 0, screen.0, screen.1),
+            ox: 0.0,
+            oy: 0.0,
+            z: 0,
+            visible: true,
+        }
+    }
+}
+
+fn apply_openness(frame: ClipRect, openness: i32) -> ClipRect {
+    let clamped = openness.clamp(0, 255) as u32;
+    if clamped >= 255 {
+        return frame;
+    }
+    if clamped == 0 || frame.height == 0 {
+        return ClipRect::empty();
+    }
+    let visible_height = (frame.height as u64 * clamped as u64 / 255) as u32;
+    if visible_height == 0 {
+        return ClipRect::empty();
+    }
+    let trimmed = ((frame.height - visible_height) / 2) as i32;
+    ClipRect::new(frame.x, frame.y + trimmed, frame.width, visible_height)
 }

@@ -1,6 +1,7 @@
-use super::{module, native_module, HandleStore};
+use super::{module, native_module, value_to_bool, HandleStore};
 use anyhow::{Context, Result};
-use image::{ImageReader, Rgba, RgbaImage};
+use font8x8::legacy::BASIC_LEGACY;
+use image::{imageops::FilterType, ImageReader, Rgba, RgbaImage};
 use once_cell::sync::Lazy;
 use rb_sys::{rb_num2int, rb_num2uint, rb_uint2inum, ruby_special_consts, special_consts, VALUE};
 use std::{
@@ -22,6 +23,10 @@ const BITMAP_CLEAR_NAME: &[u8] = b"bitmap_clear\0";
 const BITMAP_GET_PIXEL_NAME: &[u8] = b"bitmap_get_pixel\0";
 const BITMAP_SET_PIXEL_NAME: &[u8] = b"bitmap_set_pixel\0";
 const BITMAP_BLT_NAME: &[u8] = b"bitmap_blt\0";
+const BITMAP_GRADIENT_FILL_NAME: &[u8] = b"bitmap_gradient_fill_rect\0";
+const BITMAP_STRETCH_BLT_NAME: &[u8] = b"bitmap_stretch_blt\0";
+const BITMAP_DRAW_TEXT_NAME: &[u8] = b"bitmap_draw_text\0";
+const BITMAP_TEXT_SIZE_NAME: &[u8] = b"bitmap_text_size\0";
 
 static BITMAPS: Lazy<HandleStore<BitmapData>> = Lazy::new(HandleStore::default);
 
@@ -117,6 +122,30 @@ unsafe fn define_bitmap_api() -> Result<()> {
         -1,
     );
     rb_define_module_function(native, c_name(BITMAP_BLT_NAME), Some(bitmap_blt), -1);
+    rb_define_module_function(
+        native,
+        c_name(BITMAP_GRADIENT_FILL_NAME),
+        Some(bitmap_gradient_fill_rect),
+        -1,
+    );
+    rb_define_module_function(
+        native,
+        c_name(BITMAP_STRETCH_BLT_NAME),
+        Some(bitmap_stretch_blt),
+        -1,
+    );
+    rb_define_module_function(
+        native,
+        c_name(BITMAP_DRAW_TEXT_NAME),
+        Some(bitmap_draw_text),
+        -1,
+    );
+    rb_define_module_function(
+        native,
+        c_name(BITMAP_TEXT_SIZE_NAME),
+        Some(bitmap_text_size),
+        2,
+    );
     Ok(())
 }
 
@@ -315,6 +344,29 @@ unsafe extern "C" fn bitmap_fill_rect(argc: c_int, argv: *const VALUE, _self: VA
     rb_sys::Qnil as VALUE
 }
 
+unsafe extern "C" fn bitmap_gradient_fill_rect(
+    argc: c_int,
+    argv: *const VALUE,
+    _self: VALUE,
+) -> VALUE {
+    if argc < 8 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let id = rb_num2uint(args[0]) as u32;
+    let x = rb_num2int(args[1]) as i32;
+    let y = rb_num2int(args[2]) as i32;
+    let width = rb_num2int(args[3]).max(0) as i32;
+    let height = rb_num2int(args[4]).max(0) as i32;
+    let color1 = unpack_color(rb_num2uint(args[5]) as u32);
+    let color2 = unpack_color(rb_num2uint(args[6]) as u32);
+    let vertical = value_to_bool(args[7]);
+    let _ = with_bitmap_mut(id, |image| {
+        gradient_fill_raw(image, x, y, width, height, color1, color2, vertical);
+    });
+    rb_sys::Qnil as VALUE
+}
+
 unsafe extern "C" fn bitmap_clear(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
@@ -430,6 +482,98 @@ unsafe extern "C" fn bitmap_blt(argc: c_int, argv: *const VALUE, _self: VALUE) -
     rb_sys::Qnil as VALUE
 }
 
+unsafe extern "C" fn bitmap_stretch_blt(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc < 10 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let dest_id = rb_num2uint(args[0]) as u32;
+    let dx = rb_num2int(args[1]) as i32;
+    let dy = rb_num2int(args[2]) as i32;
+    let dw = rb_num2int(args[3]).max(0) as i32;
+    let dh = rb_num2int(args[4]).max(0) as i32;
+    let src_id = rb_num2uint(args[5]) as u32;
+    let sx = rb_num2int(args[6]) as i32;
+    let sy = rb_num2int(args[7]) as i32;
+    let sw = rb_num2int(args[8]).max(0) as i32;
+    let sh = rb_num2int(args[9]).max(0) as i32;
+    let opacity = if argc >= 11 {
+        rb_num2int(args[10]).clamp(0, 255) as u8
+    } else {
+        255
+    };
+    if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
+        return rb_sys::Qnil as VALUE;
+    }
+    let source = BITMAPS
+        .with(src_id, |entry| {
+            if entry.disposed {
+                None
+            } else {
+                Some(entry.texture.clone())
+            }
+        })
+        .flatten();
+    let Some(source_image) = source else {
+        return rb_sys::Qnil as VALUE;
+    };
+    if let Some(region) = extract_region(&source_image, sx, sy, sw, sh) {
+        let scaled = image::imageops::resize(&region, dw as u32, dh as u32, FilterType::Triangle);
+        let scaled_arc = Arc::new(scaled);
+        let _ = with_bitmap_mut(dest_id, |dest_image| {
+            blit_images(dest_image, dx, dy, &scaled_arc, 0, 0, dw, dh, opacity);
+        });
+    }
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc < 9 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let id = rb_num2uint(args[0]) as u32;
+    let x = rb_num2int(args[1]) as i32;
+    let y = rb_num2int(args[2]) as i32;
+    let width = rb_num2int(args[3]).max(0) as i32;
+    let height = rb_num2int(args[4]).max(0) as i32;
+    let mut text_value = args[5];
+    let text_ptr = unsafe { rb_string_value_cstr(&mut text_value) };
+    if text_ptr.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let text = unsafe { CStr::from_ptr(text_ptr) }
+        .to_string_lossy()
+        .to_string();
+    let align = rb_num2int(args[6]) as i32;
+    let font_size = rb_num2int(args[7]) as i32;
+    let font_size = font_size.max(6);
+    let color = unpack_color(rb_num2uint(args[8]) as u32);
+    let _ = with_bitmap_mut(id, |image| {
+        draw_text_run(image, x, y, width, height, &text, align, font_size, color);
+    });
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn bitmap_text_size(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 2 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let font_size = rb_num2int(*argv) as i32;
+    let font_size = font_size.max(6);
+    let mut text_value = *argv.add(1);
+    let text_ptr = rb_string_value_cstr(&mut text_value);
+    if text_ptr.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let text = CStr::from_ptr(text_ptr).to_string_lossy().to_string();
+    let (width, height) = measure_text(&text, font_size);
+    let array = rb_sys::rb_ary_new();
+    rb_sys::rb_ary_push(array, int_to_value(width as i64));
+    rb_sys::rb_ary_push(array, int_to_value(height as i64));
+    array
+}
+
 fn fill_rect_raw(image: &mut RgbaImage, x: i32, y: i32, width: i32, height: i32, color: Rgba<u8>) {
     if width <= 0 || height <= 0 {
         return;
@@ -495,6 +639,62 @@ fn blit_images(
     }
 }
 
+fn gradient_fill_raw(
+    image: &mut RgbaImage,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    start: Rgba<u8>,
+    end: Rgba<u8>,
+    vertical: bool,
+) {
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    let width_u = image.width() as i32;
+    let height_u = image.height() as i32;
+    let steps = if vertical { height } else { width }.max(1);
+    for offset in 0..steps {
+        let t = offset as f32 / steps as f32;
+        let mut color = [0u8; 4];
+        for i in 0..4 {
+            let s = start.0[i] as f32;
+            let e = end.0[i] as f32;
+            color[i] = (s + (e - s) * t).clamp(0.0, 255.0) as u8;
+        }
+        if vertical {
+            let row = y + offset;
+            if row < 0 || row >= height_u {
+                continue;
+            }
+            for col in 0..width {
+                let px = x + col;
+                if px < 0 || px >= width_u {
+                    continue;
+                }
+                let mut dst = image.get_pixel_mut(px as u32, row as u32).0;
+                blend_rgba(&mut dst, color);
+                *image.get_pixel_mut(px as u32, row as u32) = Rgba(dst);
+            }
+        } else {
+            let col = x + offset;
+            if col < 0 || col >= width_u {
+                continue;
+            }
+            for row in 0..height {
+                let py = y + row;
+                if py < 0 || py >= height_u {
+                    continue;
+                }
+                let mut dst = image.get_pixel_mut(col as u32, py as u32).0;
+                blend_rgba(&mut dst, color);
+                *image.get_pixel_mut(col as u32, py as u32) = Rgba(dst);
+            }
+        }
+    }
+}
+
 fn blend_rgba(dst: &mut [u8; 4], src: [u8; 4]) {
     let src_a = src[3] as f32 / 255.0;
     if src_a <= 0.0 {
@@ -529,4 +729,107 @@ fn unpack_color(value: u32) -> Rgba<u8> {
     let b = ((value >> 16) & 0xFF) as u8;
     let a = ((value >> 24) & 0xFF) as u8;
     Rgba([r, g, b, a])
+}
+
+fn extract_region(
+    image: &Arc<RgbaImage>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Option<RgbaImage> {
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    let x = x.max(0) as u32;
+    let y = y.max(0) as u32;
+    let width = width as u32;
+    let height = height as u32;
+    if x >= image.width() || y >= image.height() {
+        return None;
+    }
+    let max_width = (image.width() - x).min(width);
+    let max_height = (image.height() - y).min(height);
+    let mut region = RgbaImage::new(max_width, max_height);
+    for yy in 0..max_height {
+        for xx in 0..max_width {
+            let pixel = image.get_pixel(x + xx, y + yy);
+            region.put_pixel(xx, yy, *pixel);
+        }
+    }
+    Some(region)
+}
+
+fn measure_text(text: &str, font_size: i32) -> (i32, i32) {
+    let glyph_width = ((font_size as f32) * 0.6).max(1.0) as i32;
+    let width = glyph_width * text.chars().count() as i32;
+    let height = font_size.max(1);
+    (width, height)
+}
+
+fn draw_text_run(
+    image: &mut RgbaImage,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    text: &str,
+    align: i32,
+    font_size: i32,
+    color: Rgba<u8>,
+) {
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    let (text_width, glyph_height) = measure_text(text, font_size);
+    let start_x = match align {
+        1 => x + (width - text_width) / 2,
+        2 => x + width - text_width,
+        _ => x,
+    };
+    let start_y = y;
+    let glyph_width = ((font_size as f32) * 0.6).max(1.0) as i32;
+    for (index, ch) in text.chars().enumerate() {
+        let gx = start_x + index as i32 * glyph_width;
+        draw_char(image, gx, start_y, glyph_width, glyph_height, ch, color);
+    }
+}
+
+fn draw_char(
+    image: &mut RgbaImage,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    ch: char,
+    color: Rgba<u8>,
+) {
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    let code = ch as usize;
+    let glyph = if code < BASIC_LEGACY.len() {
+        BASIC_LEGACY[code]
+    } else {
+        [0u8; 8]
+    };
+    let img_width = image.width() as i32;
+    let img_height = image.height() as i32;
+    for ty in 0..height {
+        let src_y = ((ty * 8) / height).clamp(0, 7) as usize;
+        let row = glyph[src_y];
+        for tx in 0..width {
+            let src_x = ((tx * 8) / width).clamp(0, 7);
+            if (row >> src_x) & 1 == 1 {
+                let px = x + tx;
+                let py = y + ty;
+                if px < 0 || py < 0 || px >= img_width || py >= img_height {
+                    continue;
+                }
+                let mut dst = image.get_pixel_mut(px as u32, py as u32).0;
+                blend_rgba(&mut dst, color.0);
+                *image.get_pixel_mut(px as u32, py as u32) = Rgba(dst);
+            }
+        }
+    }
 }

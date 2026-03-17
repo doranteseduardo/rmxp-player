@@ -31,6 +31,7 @@ pub use sprite::{snapshot as sprite_snapshot, SpriteData};
 pub use tilemap::{snapshot as tilemap_snapshot, TilemapData};
 pub(crate) use types::{ColorData, RectData, ToneData};
 pub(crate) use util::*;
-pub use viewport::snapshot as viewport_snapshot;
+#[allow(unused_imports)]
+pub use viewport::{snapshot as viewport_snapshot, ViewportData};
 #[allow(unused_imports)]
 pub use window::{snapshot as window_snapshot, WindowData};

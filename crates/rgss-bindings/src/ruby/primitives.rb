@@ -326,7 +326,21 @@ class Bitmap
   end
 
   def stretch_blt(*args)
-    RGSS::Debug.warn_once('Bitmap#stretch_blt')
+    rect, src_bitmap, src_rect, opacity = normalize_stretch_args(args)
+    return unless @native_id && src_bitmap&.native_id && src_rect
+    RGSS::Native.bitmap_stretch_blt(
+      @native_id,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      src_bitmap.native_id,
+      src_rect.x,
+      src_rect.y,
+      src_rect.width,
+      src_rect.height,
+      opacity.to_i
+    )
   end
 
   def fill_rect(*args)
@@ -343,7 +357,18 @@ class Bitmap
   end
 
   def gradient_fill_rect(*_args)
-    RGSS::Debug.warn_once('Bitmap#gradient_fill_rect')
+    rect, c1, c2, vertical = normalize_gradient_args(_args)
+    return unless @native_id && c1 && c2
+    RGSS::Native.bitmap_gradient_fill_rect(
+      @native_id,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      pack_color(c1),
+      pack_color(c2),
+      !!vertical
+    )
   end
 
   def clear
@@ -351,11 +376,25 @@ class Bitmap
   end
 
   def text_size(_text)
-    Rect.new(0, 0, 0, 0)
+    return Rect.new unless @native_id
+    result = RGSS::Native.bitmap_text_size(@font.size, _text.to_s)
+    Rect.new(0, 0, result[0].to_i, result[1].to_i)
   end
 
-  def draw_text(*_args)
-    RGSS::Debug.warn_once('Bitmap#draw_text')
+  def draw_text(*args)
+    rect, text, align = normalize_draw_text_args(args)
+    return unless @native_id
+    RGSS::Native.bitmap_draw_text(
+      @native_id,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      text.to_s,
+      align.to_i,
+      @font.size,
+      pack_color(@font.color)
+    )
   end
 
   def get_pixel(x, y)
@@ -403,6 +442,54 @@ class Bitmap
     end
   end
 
+  def normalize_stretch_args(args)
+    if args.length >= 3 && args[0].is_a?(Rect)
+      rect = args[0].dup
+      src_bitmap = args[1]
+      src_rect = args[2]
+      opacity = args[3] || 255
+    else
+      rect = Rect.new(args[0], args[1], args[2], args[3])
+      src_bitmap = args[4]
+      src_rect = args[5]
+      opacity = args[6] || 255
+    end
+    src_rect ||= src_bitmap&.rect
+    [rect, src_bitmap, src_rect, opacity]
+  end
+
+  def normalize_gradient_args(args)
+    if args.length >= 3 && args[0].is_a?(Rect)
+      rect = args[0].dup
+      color1 = args[1]
+      color2 = args[2]
+      vertical = args[3]
+    else
+      rect = Rect.new(args[0], args[1], args[2], args[3])
+      color1 = args[4]
+      color2 = args[5]
+      vertical = args[6]
+    end
+    [rect, ensure_color(color1), ensure_color(color2), vertical]
+  end
+
+  def normalize_draw_text_args(args)
+    if args.length >= 2 && args[0].is_a?(Rect)
+      rect = args[0].dup
+      text = args[1]
+      align = args[2] || 0
+    else
+      rect = Rect.new(args[0], args[1], args[2], args[3])
+      text = args[4]
+      align = args[5] || 0
+    end
+    [rect, text, align]
+  end
+
+  def ensure_color(value)
+    value.is_a?(Color) ? value : Color.new
+  end
+
   def pack_color(color)
     r = color.red.to_i.clamp(0, 255)
     g = color.green.to_i.clamp(0, 255)
@@ -429,6 +516,29 @@ module Graphics
       handle = __snap_to_bitmap_handle()
       return nil unless handle
       Bitmap._native_wrap(handle)
+    end
+
+    def tone
+      components = _tone_vector
+      (@tone ||= Tone.new).set(*components)
+    end
+
+    def tone=(value)
+      tone = value.is_a?(Tone) ? value : Tone.new
+      _set_tone(tone.red, tone.green, tone.blue, tone.gray)
+    end
+
+    def brightness
+      _brightness_value
+    end
+
+    def brightness=(value)
+      _set_brightness(value.to_i)
+    end
+
+    def flash(color = nil, duration = 0)
+      color ||= Color.new(255, 255, 255, 255)
+      _flash(color.red, color.green, color.blue, color.alpha, duration.to_i)
     end
   end
 end
