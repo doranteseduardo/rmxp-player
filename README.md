@@ -19,6 +19,12 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 - ✅ Embedded Ruby 3.2 VM via `rb-sys`, plus an `RGSS::Native` bridge that
   mirrors Bitmap/Viewport/Sprite/Window/Plane/Tilemap classes so Ruby owns scene
   objects while Rust keeps authoritative state for rendering.
+- ✅ Core Graphics/Bitmap APIs are backed by native code: `Bitmap#blt`,
+  `Bitmap#fill_rect`, `Bitmap#get_pixel`/`set_pixel`, and `Graphics.snap_to_bitmap`
+  all operate on shared GPU-ready textures pulled straight from the renderer.
+- ✅ Kernel helpers (`load_data`, `save_data`, `data_exist?`) resolve paths
+  against the active project root so vanilla RGSS scripts can Marshal `.rxdata`
+  content without any changes.
 - ✅ Input loop maps WASD/arrow keys into an RGSS-style snapshot so the renderer
   can visualize scrolling/clamping at 640×480 (1:1 pixels, centered player).
 - ✅ Tilemap data written by real RGSS scripts (tileset, autotiles, priorities,

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use image::RgbaImage;
 use pixels::{Pixels, SurfaceTexture};
+use rgss_bindings::store_backbuffer;
 use std::sync::Arc;
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -129,6 +130,7 @@ impl<'a> Renderer<'a> {
             }
             None => draw_gradient(self.logical_size, frame, frame_index),
         }
+        capture_backbuffer(self.logical_size, frame);
         self.pixels.render()?;
         Ok(())
     }
@@ -481,3 +483,9 @@ const AUTOTILE_RECTS: [[(u32, u32); 4]; 48] = [
     [(0, 32), (80, 32), (0, 112), (80, 112)],
     [(0, 0), (16, 0), (0, 16), (16, 16)],
 ];
+
+fn capture_backbuffer(size: (u32, u32), frame: &[u8]) {
+    if let Some(image) = RgbaImage::from_raw(size.0, size.1, frame.to_vec()) {
+        store_backbuffer(Arc::new(image));
+    }
+}

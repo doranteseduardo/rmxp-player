@@ -9,3 +9,4 @@ pixels = { workspace = true }
 winit = { workspace = true }
 tracing = { workspace = true }
 image = { workspace = true }
+rgss-bindings = { path = "../rgss-bindings" }

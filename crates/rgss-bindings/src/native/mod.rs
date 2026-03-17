@@ -23,7 +23,7 @@ pub fn init() -> Result<()> {
     Ok(())
 }
 
-pub use bitmap::{snapshot as bitmap_snapshot, BitmapData};
+pub use bitmap::{create_from_texture, snapshot as bitmap_snapshot, BitmapData};
 pub(crate) use handles::HandleStore;
 pub(crate) use module::{native_module, set_project_root};
 pub use plane::{snapshot as plane_snapshot, PlaneData};

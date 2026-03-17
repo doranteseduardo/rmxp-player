@@ -18,6 +18,13 @@
 - Plane and Tilemap RGSS classes now map to native handle stores; Ruby assigns
   tilesets/autotiles/priorities via `Table` blobs and the renderer rebuilds the
   map each frame using those live snapshots (ox/oy scroll respected).
+- Kernel helpers (`load_data`, `save_data`, `data_exist?`) resolve project paths
+  and reuse Ruby `Marshal`, so vanilla scripts can read/write `.rxdata` without
+  touching the Rust side.
+- Graphics/Bitmap built-ins now run natively: `Bitmap#blt`, `Bitmap#fill_rect`,
+  `Bitmap#get_pixel`/`set_pixel`, `Bitmap#clear`, and `Graphics.snap_to_bitmap`
+  manipulate the same textures the renderer consumes, while script-level Cache
+  logic is left entirely to project `Scripts.rxdata`.
 - Added `rmxp-data` crate with a Marshal reader/JSON bridge plus engine wiring
   that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
 - Engine now parses the start map and feeds a rendered tile scene (tileset +

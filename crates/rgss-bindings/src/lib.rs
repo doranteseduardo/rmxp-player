@@ -39,6 +39,8 @@ pub fn sync_graphics_size(width: u32, height: u32) {
     graphics::set_screen_size(width, height);
 }
 
+pub use graphics::store_backbuffer;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NativeSnapshot {
     pub bitmaps: usize,

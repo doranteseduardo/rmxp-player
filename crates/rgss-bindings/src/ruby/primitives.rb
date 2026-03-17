@@ -1,3 +1,5 @@
+require 'fileutils'
+
 # Minimal RGSS class surface to unblock scripts until native bindings land.
 module RGSS
   module Debug
@@ -9,6 +11,46 @@ module RGSS
       warn("[RGSS] #{label} is not implemented yet")
       @warned[key] = true
     end
+  end
+end
+
+module Kernel
+  def data_path(relative = '')
+    RGSS::Native.project_path(relative.to_s)
+  end
+
+  def load_data(filename)
+    path = resolve_rgss_read_path(filename)
+    File.open(path, 'rb') { |f| Marshal.load(f) }
+  end
+
+  def save_data(object, filename)
+    path = resolve_rgss_write_path(filename)
+    File.open(path, 'wb') { |f| Marshal.dump(object, f) }
+    object
+  end
+
+  def data_exist?(filename)
+    path = RGSS::Native.project_path(filename.to_s)
+    path && File.exist?(path)
+  end
+
+  private
+
+  def resolve_rgss_read_path(filename)
+    name = filename.to_s
+    path = RGSS::Native.project_path(name)
+    raise Errno::ENOENT, name unless path && File.exist?(path)
+    path
+  end
+
+  def resolve_rgss_write_path(filename)
+    name = filename.to_s
+    path = RGSS::Native.project_path(name)
+    raise Errno::ENOENT, name unless path
+    dir = File.dirname(path)
+    FileUtils.mkdir_p(dir) if dir && !dir.empty?
+    path
   end
 end
 
@@ -142,83 +184,6 @@ class Table
   end
 end
 
-module Cache
-  @cache = {}
-
-  def self.load_bitmap(folder_name, filename, hue = 0)
-    path = folder_name + filename
-    if !@cache.include?(path) || @cache[path].disposed?
-      if filename != ""
-        @cache[path] = Bitmap.new(path)
-      else
-        @cache[path] = Bitmap.new(32, 32)
-      end
-    end
-    if hue == 0
-      @cache[path]
-    else
-      key = [path, hue]
-      if !@cache.include?(key) || @cache[key].disposed?
-        @cache[key] = @cache[path].dup
-        @cache[key].hue_change(hue)
-      end
-      @cache[key]
-    end
-  end
-
-  def self.animation(filename, hue)
-    load_bitmap("Graphics/Animations/", filename, hue)
-  end
-
-  def self.autotile(filename)
-    load_bitmap("Graphics/Autotiles/", filename)
-  end
-
-  def self.battleback(filename)
-    load_bitmap("Graphics/Battlebacks/", filename)
-  end
-
-  def self.battler(filename, hue)
-    load_bitmap("Graphics/Battlers/", filename, hue)
-  end
-
-  def self.character(filename, hue)
-    load_bitmap("Graphics/Characters/", filename, hue)
-  end
-
-  def self.fog(filename, hue)
-    load_bitmap("Graphics/Fogs/", filename, hue)
-  end
-
-  def self.gameover(filename)
-    load_bitmap("Graphics/Gameovers/", filename)
-  end
-
-  def self.icon(filename)
-    load_bitmap("Graphics/Icons/", filename)
-  end
-
-  def self.panorama(filename, hue = 0)
-    load_bitmap("Graphics/Panoramas/", filename, hue)
-  end
-
-  def self.picture(filename)
-    load_bitmap("Graphics/Pictures/", filename)
-  end
-
-  def self.tileset(filename)
-    load_bitmap("Graphics/Tilesets/", filename)
-  end
-
-  def self.title(filename)
-    load_bitmap("Graphics/Titles/", filename)
-  end
-
-  def self.windowskin(filename)
-    load_bitmap("Graphics/Windowskins/", filename)
-  end
-end
-
 class Font
   attr_accessor :name, :size, :bold, :italic, :shadow, :color
   @@default_name = ["Arial"]
@@ -290,6 +255,16 @@ class Bitmap
   attr_accessor :font
   attr_reader :native_id
 
+  class << self
+    def _native_wrap(handle)
+      return nil unless handle
+      obj = allocate
+      obj.instance_variable_set(:@font, Font.new)
+      obj.instance_variable_set(:@native_id, handle)
+      obj
+    end
+  end
+
   def initialize(arg1, arg2 = nil)
     @font = Font.new
     if arg1.is_a?(String)
@@ -335,16 +310,36 @@ class Bitmap
     RGSS::Debug.warn_once('Bitmap#hue_change')
   end
 
-  def blt(*_args)
-    RGSS::Debug.warn_once('Bitmap#blt')
+  def blt(x, y, src_bitmap, src_rect, opacity = 255)
+    return unless @native_id && src_bitmap&.native_id && src_rect
+    RGSS::Native.bitmap_blt(
+      @native_id,
+      x.to_i,
+      y.to_i,
+      src_bitmap.native_id,
+      src_rect.x,
+      src_rect.y,
+      src_rect.width,
+      src_rect.height,
+      opacity.to_i
+    )
   end
 
-  def stretch_blt(*_args)
+  def stretch_blt(*args)
     RGSS::Debug.warn_once('Bitmap#stretch_blt')
   end
 
-  def fill_rect(*_args)
-    RGSS::Debug.warn_once('Bitmap#fill_rect')
+  def fill_rect(*args)
+    rect, color = normalize_rect_color_args(args)
+    return unless rect && color && @native_id
+    RGSS::Native.bitmap_fill_rect(
+      @native_id,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      pack_color(color)
+    )
   end
 
   def gradient_fill_rect(*_args)
@@ -352,7 +347,7 @@ class Bitmap
   end
 
   def clear
-    RGSS::Debug.warn_once('Bitmap#clear')
+    RGSS::Native.bitmap_clear(@native_id) if @native_id
   end
 
   def text_size(_text)
@@ -363,19 +358,58 @@ class Bitmap
     RGSS::Debug.warn_once('Bitmap#draw_text')
   end
 
-  def get_pixel(_x, _y)
-    Color.new
+  def get_pixel(x, y)
+    return Color.new unless @native_id
+    packed = RGSS::Native.bitmap_get_pixel(@native_id, x.to_i, y.to_i)
+    return Color.new unless packed
+    r = packed & 0xFF
+    g = (packed >> 8) & 0xFF
+    b = (packed >> 16) & 0xFF
+    a = (packed >> 24) & 0xFF
+    Color.new(r, g, b, a)
   end
 
-  def set_pixel(*_args)
-    RGSS::Debug.warn_once('Bitmap#set_pixel')
+  def set_pixel(x, y, color)
+    return unless @native_id && color
+    RGSS::Native.bitmap_set_pixel(
+      @native_id,
+      x.to_i,
+      y.to_i,
+      color.red.to_i,
+      color.green.to_i,
+      color.blue.to_i,
+      color.alpha.to_i
+    )
   end
 
   def dup
-    Bitmap.new(width, height)
+    copy = Bitmap.new(width, height)
+    copy.font = @font.dup
+    copy_rect = Rect.new(0, 0, width, height)
+    copy.blt(0, 0, self, copy_rect)
+    copy
   end
 
   private
+
+  def normalize_rect_color_args(args)
+    if args.length == 2 && args.first.is_a?(Rect)
+      [args.first, args.last]
+    elsif args.length >= 5
+      rect = Rect.new(args[0], args[1], args[2], args[3])
+      [rect, args[4]]
+    else
+      [nil, nil]
+    end
+  end
+
+  def pack_color(color)
+    r = color.red.to_i.clamp(0, 255)
+    g = color.green.to_i.clamp(0, 255)
+    b = color.blue.to_i.clamp(0, 255)
+    a = color.alpha.to_i.clamp(0, 255)
+    r | (g << 8) | (b << 16) | (a << 24)
+  end
 
   def allocate_blank(width, height)
     unless RGSS.const_defined?(:Native)
@@ -384,6 +418,18 @@ class Bitmap
       return
     end
     @native_id = RGSS::Native.bitmap_create([width, 1].max, [height, 1].max)
+  end
+end
+
+module Graphics
+  class << self
+    alias_method :__snap_to_bitmap_handle, :_snap_to_bitmap_handle
+
+    def snap_to_bitmap
+      handle = __snap_to_bitmap_handle()
+      return nil unless handle
+      Bitmap._native_wrap(handle)
+    end
   end
 end
 

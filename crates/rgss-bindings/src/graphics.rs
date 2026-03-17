@@ -1,18 +1,25 @@
+use crate::native;
 use anyhow::{anyhow, Result};
-use once_cell::sync::OnceCell;
+use image::RgbaImage;
+use once_cell::sync::{Lazy, OnceCell};
 use rb_sys::{
     rb_define_module, rb_int2big, rb_num2long, ruby_special_consts, special_consts, VALUE,
 };
 use std::{
     os::raw::{c_char, c_int},
-    sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering},
+        Arc, RwLock,
+    },
 };
+
 static GRAPHICS_MODULE: OnceCell<()> = OnceCell::new();
 static FRAME_COUNT: AtomicI64 = AtomicI64::new(0);
 static FRAME_RATE: AtomicU32 = AtomicU32::new(60);
 static SCREEN_WIDTH: AtomicU32 = AtomicU32::new(640);
 static SCREEN_HEIGHT: AtomicU32 = AtomicU32::new(480);
 static SCREEN_FROZEN: AtomicBool = AtomicBool::new(false);
+static LAST_FRAME: Lazy<RwLock<Option<Arc<RgbaImage>>>> = Lazy::new(|| RwLock::new(None));
 
 const GRAPHICS_NAME: &[u8] = b"Graphics\0";
 const UPDATE_NAME: &[u8] = b"update\0";
@@ -27,6 +34,7 @@ const WAIT_NAME: &[u8] = b"wait\0";
 const WIDTH_NAME: &[u8] = b"width\0";
 const HEIGHT_NAME: &[u8] = b"height\0";
 const RESIZE_SCREEN_NAME: &[u8] = b"resize_screen\0";
+const SNAP_TO_BITMAP_NAME: &[u8] = b"_snap_to_bitmap_handle\0";
 
 type RubyFn = unsafe extern "C" fn(c_int, *const VALUE, VALUE) -> VALUE;
 
@@ -112,6 +120,12 @@ unsafe fn define_graphics() -> Result<()> {
         c_name(RESIZE_SCREEN_NAME),
         Some(graphics_resize_screen),
         2,
+    );
+    rb_define_module_function(
+        module,
+        c_name(SNAP_TO_BITMAP_NAME),
+        Some(graphics_snap_to_bitmap),
+        0,
     );
     Ok(())
 }
@@ -239,4 +253,27 @@ fn int_to_value(value: i64) -> VALUE {
 
 fn c_name(bytes: &[u8]) -> *const c_char {
     bytes.as_ptr() as *const c_char
+}
+
+pub fn store_backbuffer(image: Arc<RgbaImage>) {
+    if let Ok(mut slot) = LAST_FRAME.write() {
+        *slot = Some(image);
+    }
+}
+
+unsafe extern "C" fn graphics_snap_to_bitmap(
+    _argc: c_int,
+    _argv: *const VALUE,
+    _self: VALUE,
+) -> VALUE {
+    let snapshot = LAST_FRAME
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned());
+    if let Some(frame) = snapshot {
+        let id = native::create_from_texture(frame);
+        rb_sys::rb_uint2inum(id as usize)
+    } else {
+        rb_sys::Qnil as VALUE
+    }
 }
