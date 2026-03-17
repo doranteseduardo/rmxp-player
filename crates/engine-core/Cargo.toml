@@ -16,3 +16,4 @@ rmxp-data = { path = "../data" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true }
+once_cell = { workspace = true }

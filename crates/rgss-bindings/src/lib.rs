@@ -4,13 +4,15 @@ mod graphics;
 mod input;
 mod kernel;
 mod native;
+mod runtime;
 mod scripts;
+mod system;
 
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use rb_sys::{
-    rb_errinfo, rb_eval_string_protect, rb_obj_as_string, rb_string_value_cstr, ruby_init_stack,
-    ruby_setup, ruby_sysinit, VALUE,
+    rb_errinfo, rb_eval_string_protect, rb_obj_as_string, rb_require, rb_string_value_cstr,
+    ruby_init_loadpath, ruby_init_stack, ruby_setup, ruby_sysinit, VALUE,
 };
 use std::{
     ffi::{CStr, CString},
@@ -23,16 +25,28 @@ use tracing::{debug, info, warn};
 static RUBY_INIT: OnceCell<()> = OnceCell::new();
 
 pub use input::{
-    update_input, InputSnapshot, BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_DOWN, BUTTON_LEFT,
-    BUTTON_RIGHT, BUTTON_UP,
+    update_input, InputSnapshot, BUTTON_A, BUTTON_B, BUTTON_C, BUTTON_DOWN, BUTTON_L, BUTTON_LEFT,
+    BUTTON_R, BUTTON_RIGHT, BUTTON_UP, BUTTON_X, BUTTON_Y, BUTTON_Z,
 };
 pub use native::{
     bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, viewport_snapshot,
     window_snapshot, BitmapData, PlaneData, SpriteData, TilemapData, ViewportData, WindowData,
 };
+pub use system::{
+    display_size, install_window_hooks, resize_window, set_game_title, set_platform_info,
+    sync_window_dimensions, update_frame_delta, PlatformInfo, WindowHooks,
+};
 
 pub fn set_project_root(path: &Path) {
     native::set_project_root(path);
+}
+
+pub fn set_config_dir(path: &Path) {
+    native::set_config_dir(path);
+}
+
+pub fn set_save_dir(path: &Path) {
+    native::set_save_dir(path);
 }
 
 pub fn sync_graphics_size(width: u32, height: u32) {
@@ -64,6 +78,7 @@ pub fn native_snapshot() -> NativeSnapshot {
 
 pub struct RubyVm {
     booted: bool,
+    main_active: bool,
 }
 
 pub struct ScriptSection<'a> {
@@ -74,7 +89,10 @@ pub struct ScriptSection<'a> {
 
 impl RubyVm {
     pub fn new() -> Self {
-        Self { booted: false }
+        Self {
+            booted: false,
+            main_active: false,
+        }
     }
 
     /// Boots the embedded Ruby interpreter (MRI).
@@ -86,6 +104,7 @@ impl RubyVm {
             kernel::init()?;
             input::init()?;
             native::init()?;
+            system::init()?;
             self.booted = true;
             scripts::load(self)?;
         }
@@ -112,12 +131,41 @@ impl RubyVm {
         self.booted
     }
 
-    pub fn run_scripts<'a>(&self, sections: &[ScriptSection<'a>]) -> Result<()> {
+    pub fn run_scripts<'a>(&mut self, sections: &[ScriptSection<'a>]) -> Result<()> {
         ensure_ruby()?;
         for section in sections {
             eval_section(section)?;
         }
+        self.main_active = runtime::is_main_active().unwrap_or(false);
+        if !self.main_active {
+            warn!(
+                target: "rgss",
+                "Scripts evaluated but rgss_main was not registered (no main loop detected)"
+            );
+        }
         Ok(())
+    }
+
+    pub fn resume_main_loop(&mut self) -> Result<bool> {
+        if !self.booted || !self.main_active {
+            return Ok(false);
+        }
+        match runtime::resume_main() {
+            Ok(active) => {
+                if !active {
+                    self.main_active = false;
+                }
+                Ok(active)
+            }
+            Err(err) => {
+                self.main_active = false;
+                Err(err)
+            }
+        }
+    }
+
+    pub fn has_main_loop(&self) -> bool {
+        self.main_active
     }
 }
 
@@ -140,10 +188,19 @@ unsafe fn start_ruby() -> Result<()> {
     if code != 0 {
         return Err(anyhow!("ruby_setup failed with code {code}"));
     }
+    ruby_init_loadpath();
+    require_feature("enc/encdb")?;
+    require_feature("enc/trans/transdb")?;
     Ok(())
 }
 
-unsafe fn current_exception_message() -> String {
+unsafe fn require_feature(feature: &str) -> Result<()> {
+    let feature = CString::new(feature)?;
+    rb_require(feature.as_ptr());
+    Ok(())
+}
+
+pub(crate) unsafe fn current_exception_message() -> String {
     let err = rb_errinfo();
     let mut string = rb_obj_as_string(err);
     let ptr = rb_string_value_cstr(&mut string);

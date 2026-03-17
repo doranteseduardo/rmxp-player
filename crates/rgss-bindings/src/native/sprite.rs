@@ -32,6 +32,7 @@ const SET_MIRROR_NAME: &[u8] = b"sprite_set_mirror\0";
 const SET_BUSH_DEPTH_NAME: &[u8] = b"sprite_set_bush_depth\0";
 const SET_OPACITY_NAME: &[u8] = b"sprite_set_opacity\0";
 const SET_BLEND_TYPE_NAME: &[u8] = b"sprite_set_blend_type\0";
+const SET_BUSH_OPACITY_NAME: &[u8] = b"sprite_set_bush_opacity\0";
 const SET_VISIBLE_NAME: &[u8] = b"sprite_set_visible\0";
 const SET_SRC_RECT_NAME: &[u8] = b"sprite_set_src_rect\0";
 const SET_COLOR_NAME: &[u8] = b"sprite_set_color\0";
@@ -53,6 +54,7 @@ pub struct SpriteData {
     pub angle: f32,
     pub mirror: bool,
     pub bush_depth: i32,
+    pub bush_opacity: i32,
     pub opacity: i32,
     pub blend_type: i32,
     pub visible: bool,
@@ -77,6 +79,7 @@ impl Default for SpriteData {
             angle: 0.0,
             mirror: false,
             bush_depth: 0,
+            bush_opacity: 128,
             opacity: 255,
             blend_type: 0,
             visible: true,
@@ -132,6 +135,12 @@ unsafe fn define_sprite_api() -> Result<()> {
         native,
         c_name(SET_BLEND_TYPE_NAME),
         Some(sprite_set_blend_type),
+        2,
+    );
+    rb_define_module_function(
+        native,
+        c_name(SET_BUSH_OPACITY_NAME),
+        Some(sprite_set_bush_opacity),
         2,
     );
     rb_define_module_function(
@@ -201,6 +210,9 @@ sprite_setter!(sprite_set_angle, angle, |val| value_to_f32(val));
 sprite_setter!(sprite_set_bush_depth, bush_depth, |val| value_to_i32(val));
 sprite_setter!(sprite_set_opacity, opacity, |val| value_to_i32(val));
 sprite_setter!(sprite_set_blend_type, blend_type, |val| value_to_i32(val));
+sprite_setter!(sprite_set_bush_opacity, bush_opacity, |val| value_to_i32(
+    val
+));
 
 unsafe extern "C" fn sprite_set_viewport(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     if argc != 2 || argv.is_null() {

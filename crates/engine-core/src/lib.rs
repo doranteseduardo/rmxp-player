@@ -3,22 +3,27 @@ use audio::AudioSystem;
 use game::GameState;
 use image::RgbaImage;
 use input::InputState;
+use once_cell::sync::{Lazy, OnceCell};
 use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
-use rgss_bindings::{native_snapshot, sync_graphics_size, update_input, RubyVm, ScriptSection};
+use rgss_bindings::{
+    install_window_hooks, native_snapshot, set_config_dir as rgss_set_config_dir, set_game_title,
+    set_platform_info, set_project_root, set_save_dir as rgss_set_save_dir, sync_graphics_size,
+    update_frame_delta, update_input, PlatformInfo, RubyVm, ScriptSection, WindowHooks,
+};
 use rmxp_data::{MapData, SystemData};
 use std::{
     env,
-    sync::Arc,
+    sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
 use winit::{
-    dpi::LogicalSize,
+    dpi::{LogicalSize, PhysicalPosition},
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    window::{Fullscreen, WindowBuilder},
 };
 use winit_input_helper::WinitInputHelper;
 
@@ -51,15 +56,23 @@ struct FinalizedConfig {
     title: String,
 }
 
+static WINDOW_HANDLE: OnceCell<usize> = OnceCell::new();
+static WINDOW_TITLE: Lazy<RwLock<String>> =
+    Lazy::new(|| RwLock::new(String::from("RMXP Native Player")));
+
 pub fn run(config: AppConfig) -> Result<()> {
     platform::init_logging();
-    platform::app_paths().context("initializing app paths")?;
+    let paths = platform::app_paths().context("initializing app paths")?;
+    rgss_set_config_dir(&paths.config_dir);
+    rgss_set_save_dir(&paths.save_dir);
     let stored = platform::load_or_default();
     let cfg = config.finalize(stored);
+    set_game_title(cfg.title.clone());
+    set_platform_info(detect_platform_info());
 
     let project = match GameProject::from_env() {
         Ok(project) => {
-            rgss_bindings::set_project_root(project.root());
+            set_project_root(project.root());
             info!(target: "project", root = ?project.data_dir(), "Project path resolved");
             Some(project)
         }
@@ -77,6 +90,9 @@ pub fn run(config: AppConfig) -> Result<()> {
         match project_ref.load_database() {
             Ok(db) => {
                 db.log_summary();
+                if let Some(system) = db.system.as_ref() {
+                    set_game_title(system.game_title.clone());
+                }
                 let scene = build_initial_tile_scene(project_ref, &db);
                 (Some(db), scene)
             }
@@ -113,6 +129,7 @@ pub fn run(config: AppConfig) -> Result<()> {
     );
 
     let window_ptr: *mut winit::window::Window = Box::into_raw(window);
+    register_window_hooks(window_ptr, &cfg.title);
     let mut renderer = Renderer::new(unsafe { &*window_ptr }, cfg.window_width, cfg.window_height)?;
     sync_graphics_size(cfg.window_width, cfg.window_height);
     rgss_bindings::sync_graphics_size(cfg.window_width, cfg.window_height);
@@ -192,10 +209,15 @@ pub fn run(config: AppConfig) -> Result<()> {
             }
             Event::AboutToWait => {
                 let now = Instant::now();
-                accumulator += now - last_tick;
+                let delta = now - last_tick;
                 last_tick = now;
+                update_frame_delta(delta.as_secs_f64());
+                accumulator += delta;
                 while accumulator >= FIXED_TIMESTEP {
                     update_input(input_state.snapshot());
+                    if let Err(err) = ruby_vm.resume_main_loop() {
+                        warn!(target: "rgss", error = %err, "Ruby main loop error; stopping updates");
+                    }
                     game.update(FIXED_TIMESTEP, &input_state);
                     accumulator -= FIXED_TIMESTEP;
                 }
@@ -314,6 +336,147 @@ fn resolve_start_map_id(system: &SystemData) -> i32 {
         }
     }
     system.start_map_id.max(1)
+}
+
+fn register_window_hooks(window_ptr: *mut winit::window::Window, initial_title: &str) {
+    let _ = WINDOW_HANDLE.set(window_ptr as usize);
+    if let Ok(mut guard) = WINDOW_TITLE.write() {
+        *guard = initial_title.to_string();
+    }
+    install_window_hooks(WindowHooks {
+        set_title: engine_set_window_title,
+        get_title: engine_get_window_title,
+        set_inner_size: engine_set_inner_size,
+        get_display_size: engine_get_display_size,
+        center: engine_center_window,
+        set_fullscreen: engine_set_fullscreen,
+        set_cursor_visible: engine_set_cursor_visible,
+    });
+}
+
+fn with_window<F>(f: F)
+where
+    F: FnOnce(&winit::window::Window),
+{
+    if let Some(handle) = WINDOW_HANDLE.get() {
+        let raw = *handle as *mut winit::window::Window;
+        unsafe {
+            if let Some(window) = raw.as_ref() {
+                f(window);
+            }
+        }
+    }
+}
+
+fn engine_set_window_title(title: &str) {
+    {
+        if let Ok(mut guard) = WINDOW_TITLE.write() {
+            *guard = title.to_string();
+        }
+    }
+    with_window(|window| window.set_title(title));
+}
+
+fn engine_get_window_title() -> String {
+    WINDOW_TITLE
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|_| "RMXP Native Player".into())
+}
+
+fn engine_set_inner_size(width: u32, height: u32) {
+    with_window(|window| {
+        let _ = window.request_inner_size(LogicalSize::new(width as f64, height as f64));
+    });
+}
+
+fn engine_get_display_size() -> (u32, u32) {
+    let mut size = (640u32, 480u32);
+    with_window(|window| {
+        let inner = window.inner_size();
+        size = (inner.width.max(1), inner.height.max(1));
+    });
+    size
+}
+
+fn engine_center_window() {
+    with_window(|window| {
+        if let Some(monitor) = window.current_monitor() {
+            let monitor_size = monitor.size();
+            let outer = window.outer_size();
+            let monitor_origin = monitor.position();
+            let pos_x = monitor_origin.x
+                + (monitor_size.width as i32 - outer.width as i32).saturating_div(2);
+            let pos_y = monitor_origin.y
+                + (monitor_size.height as i32 - outer.height as i32).saturating_div(2);
+            window.set_outer_position(PhysicalPosition::new(pos_x, pos_y));
+        }
+    });
+}
+
+fn engine_set_fullscreen(enable: bool) {
+    with_window(|window| {
+        if enable {
+            let target_monitor = window.current_monitor().or_else(|| {
+                window
+                    .available_monitors()
+                    .next()
+                    .or_else(|| Some(window.primary_monitor()).flatten())
+            });
+            window.set_fullscreen(Some(Fullscreen::Borderless(target_monitor)));
+        } else {
+            window.set_fullscreen(None);
+        }
+    });
+}
+
+fn engine_set_cursor_visible(visible: bool) {
+    with_window(|window| window.set_cursor_visible(visible));
+}
+
+fn detect_platform_info() -> PlatformInfo {
+    PlatformInfo {
+        platform: detect_platform_name(),
+        user_name: detect_user_name(),
+        user_language: detect_user_language(),
+    }
+}
+
+fn detect_platform_name() -> String {
+    match env::consts::OS {
+        "macos" => "macOS".into(),
+        "windows" => "Windows".into(),
+        "linux" => "Linux".into(),
+        other => other.to_string(),
+    }
+}
+
+fn detect_user_name() -> String {
+    env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .unwrap_or_else(|_| "Player".into())
+}
+
+fn detect_user_language() -> String {
+    const LANG_VARS: [&str; 3] = ["LC_ALL", "LC_MESSAGES", "LANG"];
+    for var in LANG_VARS {
+        if let Ok(value) = env::var(var) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return normalize_locale(trimmed);
+            }
+        }
+    }
+    "en_US".into()
+}
+
+fn normalize_locale(value: &str) -> String {
+    let base = value.split('.').next().unwrap_or(value);
+    if let Some((lang, region)) = base.split_once(['_', '-']) {
+        format!("{}_{}", lang.to_lowercase(), region.to_uppercase())
+    } else {
+        base.to_lowercase()
+    }
 }
 
 fn load_autotile_textures(project: &GameProject, names: &[String]) -> Vec<Option<AutotileTexture>> {

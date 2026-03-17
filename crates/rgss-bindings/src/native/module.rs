@@ -10,10 +10,14 @@ use std::{
 const RGSS_MODULE_NAME: &[u8] = b"RGSS\0";
 const NATIVE_MODULE_NAME: &[u8] = b"Native\0";
 const PROJECT_PATH_NAME: &[u8] = b"project_path\0";
+const CONFIG_PATH_NAME: &[u8] = b"config_path\0";
+const SAVE_PATH_NAME: &[u8] = b"save_path\0";
 
 static RGSS_MODULE: OnceCell<VALUE> = OnceCell::new();
 static NATIVE_MODULE: OnceCell<VALUE> = OnceCell::new();
 static PROJECT_ROOT: OnceCell<PathBuf> = OnceCell::new();
+static CONFIG_DIR: OnceCell<PathBuf> = OnceCell::new();
+static SAVE_DIR: OnceCell<PathBuf> = OnceCell::new();
 static NATIVE_FUNCTIONS: OnceCell<()> = OnceCell::new();
 
 extern "C" {
@@ -65,8 +69,24 @@ pub fn set_project_root(path: impl AsRef<Path>) {
     let _ = PROJECT_ROOT.set(path.as_ref().to_path_buf());
 }
 
+pub fn set_config_dir(path: impl AsRef<Path>) {
+    let _ = CONFIG_DIR.set(path.as_ref().to_path_buf());
+}
+
+pub fn set_save_dir(path: impl AsRef<Path>) {
+    let _ = SAVE_DIR.set(path.as_ref().to_path_buf());
+}
+
 pub fn project_root() -> Option<&'static PathBuf> {
     PROJECT_ROOT.get()
+}
+
+pub fn config_dir() -> Option<&'static PathBuf> {
+    CONFIG_DIR.get()
+}
+
+pub fn save_dir() -> Option<&'static PathBuf> {
+    SAVE_DIR.get()
 }
 
 pub fn resolve_project_path(relative: &str) -> Option<PathBuf> {
@@ -88,6 +108,13 @@ unsafe fn define_native_functions(module: VALUE) -> Result<()> {
         Some(native_project_path),
         -1,
     );
+    rb_define_module_function(
+        module,
+        c_name(CONFIG_PATH_NAME),
+        Some(native_config_path),
+        0,
+    );
+    rb_define_module_function(module, c_name(SAVE_PATH_NAME), Some(native_save_path), 0);
     Ok(())
 }
 
@@ -107,6 +134,20 @@ unsafe extern "C" fn native_project_path(argc: c_int, argv: *const VALUE, _self:
     let text = CStr::from_ptr(ptr).to_string_lossy();
     match resolve_project_path(text.trim()) {
         Some(path) => path_to_value(&path),
+        None => rb_sys::Qnil as VALUE,
+    }
+}
+
+unsafe extern "C" fn native_config_path(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    match config_dir() {
+        Some(path) => path_to_value(path),
+        None => rb_sys::Qnil as VALUE,
+    }
+}
+
+unsafe extern "C" fn native_save_path(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    match save_dir() {
+        Some(path) => path_to_value(path),
         None => rb_sys::Qnil as VALUE,
     }
 }

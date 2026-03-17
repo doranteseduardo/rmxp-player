@@ -125,6 +125,18 @@ impl GameState {
                     oy: data.oy as f32,
                     z: data.z,
                     visible: data.visible && !data.disposed,
+                    tone: [
+                        data.tone.red,
+                        data.tone.green,
+                        data.tone.blue,
+                        data.tone.gray,
+                    ],
+                    color: [
+                        data.color.red,
+                        data.color.green,
+                        data.color.blue,
+                        data.color.alpha,
+                    ],
                 };
                 (id, info)
             })
@@ -161,11 +173,33 @@ impl GameState {
                     tilemap.oy as f32 + viewport.oy,
                 ),
             };
+            let tone = combine_tone(
+                [
+                    tilemap.tone.red,
+                    tilemap.tone.green,
+                    tilemap.tone.blue,
+                    tilemap.tone.gray,
+                ],
+                viewport,
+            );
+            let color = combine_color(
+                [
+                    tilemap.color.red,
+                    tilemap.color.green,
+                    tilemap.color.blue,
+                    tilemap.color.alpha,
+                ],
+                viewport,
+            );
             self.tilemaps.push(TilemapInstance {
                 scene,
                 camera,
                 clip,
                 z: viewport.z,
+                tone,
+                color,
+                opacity: tilemap.opacity.clamp(0, 255) as u8,
+                blend_type: tilemap.blend_type.clamp(0, 2) as u8,
             });
         }
     }
@@ -194,23 +228,33 @@ impl GameState {
                 .rect
                 .clamp(self.screen_size)
                 .unwrap_or_else(|| ClipRect::new(0, 0, self.screen_size.0, self.screen_size.1));
-            self.planes.push(PlaneInstance {
-                texture: bitmap,
-                clip,
-                scroll: (
-                    plane.ox as f32 + viewport.ox,
-                    plane.oy as f32 + viewport.oy,
-                ),
-                zoom: (plane.zoom_x.max(0.0), plane.zoom_y.max(0.0)),
-                opacity: plane.opacity.clamp(0, 255) as u8,
-                blend_type: plane.blend_type.clamp(0, 2) as u8,
-                tone: [plane.tone.red, plane.tone.green, plane.tone.blue, plane.tone.gray],
-                color: [
+            let tone = combine_tone(
+                [
+                    plane.tone.red,
+                    plane.tone.green,
+                    plane.tone.blue,
+                    plane.tone.gray,
+                ],
+                viewport,
+            );
+            let color = combine_color(
+                [
                     plane.color.red,
                     plane.color.green,
                     plane.color.blue,
                     plane.color.alpha,
                 ],
+                viewport,
+            );
+            self.planes.push(PlaneInstance {
+                texture: bitmap,
+                clip,
+                scroll: (plane.ox as f32 + viewport.ox, plane.oy as f32 + viewport.oy),
+                zoom: (plane.zoom_x.max(0.0), plane.zoom_y.max(0.0)),
+                opacity: plane.opacity.clamp(0, 255) as u8,
+                blend_type: plane.blend_type.clamp(0, 2) as u8,
+                tone,
+                color,
                 z: viewport.z.saturating_mul(1000).saturating_add(plane.z),
             });
         }
@@ -266,6 +310,24 @@ impl GameState {
                 sprite.ox as f32 - src_x as f32,
                 sprite.oy as f32 - src_y as f32,
             );
+            let tone = combine_tone(
+                [
+                    sprite.tone.red,
+                    sprite.tone.green,
+                    sprite.tone.blue,
+                    sprite.tone.gray,
+                ],
+                viewport,
+            );
+            let color = combine_color(
+                [
+                    sprite.color.red,
+                    sprite.color.green,
+                    sprite.color.blue,
+                    sprite.color.alpha,
+                ],
+                viewport,
+            );
             self.sprites.push(SpriteInstance {
                 texture: bitmap,
                 src_rect: (src_x, src_y, src_w, src_h),
@@ -276,15 +338,11 @@ impl GameState {
                 scale: (sprite.zoom_x, sprite.zoom_y),
                 angle: sprite.angle,
                 mirror: sprite.mirror,
-                tone: [sprite.tone.red, sprite.tone.green, sprite.tone.blue, sprite.tone.gray],
-                color: [
-                    sprite.color.red,
-                    sprite.color.green,
-                    sprite.color.blue,
-                    sprite.color.alpha,
-                ],
+                tone,
+                color,
                 blend_type: sprite.blend_type.clamp(0, 2) as u8,
                 bush_depth: sprite.bush_depth.max(0) as u32,
+                bush_opacity: sprite.bush_opacity.clamp(0, 255) as u8,
                 clip,
             });
         }
@@ -333,9 +391,7 @@ impl GameState {
             let windowskin = window
                 .windowskin_id
                 .and_then(|id| textures.get(&id).cloned());
-            let contents = window
-                .contents_id
-                .and_then(|id| textures.get(&id).cloned());
+            let contents = window.contents_id.and_then(|id| textures.get(&id).cloned());
             let cursor_rect = if window.cursor_rect.width > 0 && window.cursor_rect.height > 0 {
                 Some(ClipRect::new(
                     frame_rect.x + WINDOW_PADDING + window.cursor_rect.x,
@@ -346,6 +402,24 @@ impl GameState {
             } else {
                 None
             };
+            let tone = combine_tone(
+                [
+                    window.tone.red,
+                    window.tone.green,
+                    window.tone.blue,
+                    window.tone.gray,
+                ],
+                viewport,
+            );
+            let color = combine_color(
+                [
+                    window.color.red,
+                    window.color.green,
+                    window.color.blue,
+                    window.color.alpha,
+                ],
+                viewport,
+            );
             self.windows.push(WindowInstance {
                 frame_rect,
                 visible_rect,
@@ -356,13 +430,8 @@ impl GameState {
                 opacity: window.opacity.clamp(0, 255) as u8,
                 back_opacity: window.back_opacity.clamp(0, 255) as u8,
                 contents_opacity: window.contents_opacity.clamp(0, 255) as u8,
-                tone: [window.tone.red, window.tone.green, window.tone.blue, window.tone.gray],
-                color: [
-                    window.color.red,
-                    window.color.green,
-                    window.color.blue,
-                    window.color.alpha,
-                ],
+                tone,
+                color,
                 cursor_rect,
                 cursor_active: window.active || window.pause,
                 z: viewport.z.saturating_mul(1000).saturating_add(window.z),
@@ -471,6 +540,8 @@ struct ViewportInfo {
     oy: f32,
     z: i32,
     visible: bool,
+    tone: [f32; 4],
+    color: [f32; 4],
 }
 
 impl ViewportInfo {
@@ -481,8 +552,38 @@ impl ViewportInfo {
             oy: 0.0,
             z: 0,
             visible: true,
+            tone: [0.0; 4],
+            color: [0.0; 4],
         }
     }
+}
+
+fn combine_tone(mut tone: [f32; 4], viewport: &ViewportInfo) -> [f32; 4] {
+    tone[0] = clamp_tone_channel(tone[0] + viewport.tone[0]);
+    tone[1] = clamp_tone_channel(tone[1] + viewport.tone[1]);
+    tone[2] = clamp_tone_channel(tone[2] + viewport.tone[2]);
+    tone[3] = clamp_gray_channel(tone[3] + viewport.tone[3]);
+    tone
+}
+
+fn combine_color(mut color: [f32; 4], viewport: &ViewportInfo) -> [f32; 4] {
+    color[0] = clamp_color_channel(color[0] + viewport.color[0]);
+    color[1] = clamp_color_channel(color[1] + viewport.color[1]);
+    color[2] = clamp_color_channel(color[2] + viewport.color[2]);
+    color[3] = clamp_color_channel(color[3] + viewport.color[3]);
+    color
+}
+
+fn clamp_tone_channel(value: f32) -> f32 {
+    value.clamp(-255.0, 255.0)
+}
+
+fn clamp_gray_channel(value: f32) -> f32 {
+    value.clamp(0.0, 255.0)
+}
+
+fn clamp_color_channel(value: f32) -> f32 {
+    value.clamp(0.0, 255.0)
 }
 
 fn apply_openness(frame: ClipRect, openness: i32) -> ClipRect {

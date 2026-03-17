@@ -620,6 +620,7 @@ dependencies = [
  "anyhow",
  "audio",
  "image",
+ "once_cell",
  "platform",
  "render",
  "rgss-bindings",

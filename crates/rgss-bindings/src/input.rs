@@ -26,7 +26,7 @@ struct ButtonConst {
     mask: u16,
 }
 
-const BUTTON_TABLE: [ButtonConst; 7] = [
+const BUTTON_TABLE: [ButtonConst; 12] = [
     ButtonConst {
         name: b"DOWN\0",
         rgss_id: 2,
@@ -62,6 +62,31 @@ const BUTTON_TABLE: [ButtonConst; 7] = [
         rgss_id: 13,
         mask: BUTTON_C,
     },
+    ButtonConst {
+        name: b"X\0",
+        rgss_id: 14,
+        mask: BUTTON_X,
+    },
+    ButtonConst {
+        name: b"Y\0",
+        rgss_id: 15,
+        mask: BUTTON_Y,
+    },
+    ButtonConst {
+        name: b"Z\0",
+        rgss_id: 16,
+        mask: BUTTON_Z,
+    },
+    ButtonConst {
+        name: b"L\0",
+        rgss_id: 17,
+        mask: BUTTON_L,
+    },
+    ButtonConst {
+        name: b"R\0",
+        rgss_id: 18,
+        mask: BUTTON_R,
+    },
 ];
 
 static INPUT_MODULE: OnceCell<()> = OnceCell::new();
@@ -74,6 +99,11 @@ pub const BUTTON_UP: u16 = 1 << 3;
 pub const BUTTON_A: u16 = 1 << 4;
 pub const BUTTON_B: u16 = 1 << 5;
 pub const BUTTON_C: u16 = 1 << 6;
+pub const BUTTON_X: u16 = 1 << 7;
+pub const BUTTON_Y: u16 = 1 << 8;
+pub const BUTTON_Z: u16 = 1 << 9;
+pub const BUTTON_L: u16 = 1 << 10;
+pub const BUTTON_R: u16 = 1 << 11;
 
 type RubyFn = unsafe extern "C" fn(c_int, *const VALUE, VALUE) -> VALUE;
 

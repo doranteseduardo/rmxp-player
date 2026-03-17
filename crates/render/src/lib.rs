@@ -136,6 +136,7 @@ pub struct SpriteInstance {
     pub color: [f32; 4],
     pub blend_type: u8,
     pub bush_depth: u32,
+    pub bush_opacity: u8,
     pub clip: ClipRect,
 }
 
@@ -145,6 +146,10 @@ pub struct TilemapInstance {
     pub camera: Camera,
     pub clip: ClipRect,
     pub z: i32,
+    pub tone: [f32; 4],
+    pub color: [f32; 4],
+    pub opacity: u8,
+    pub blend_type: u8,
 }
 
 #[derive(Clone)]
@@ -180,7 +185,12 @@ pub struct WindowInstance {
 
 impl ClipRect {
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub fn empty() -> Self {
@@ -401,7 +411,20 @@ fn draw_tile_scene(
     frame_index: u64,
 ) {
     let clip = ClipRect::new(0, 0, size.0, size.1);
-    draw_tilemap_region(scene, camera, clip, size, frame, frame_index);
+    let neutral_tone = [0.0, 0.0, 0.0, 0.0];
+    let neutral_color = [0.0, 0.0, 0.0, 0.0];
+    draw_tilemap_region(
+        scene,
+        camera,
+        clip,
+        size,
+        frame,
+        frame_index,
+        &neutral_tone,
+        &neutral_color,
+        255,
+        0,
+    );
     if let Some(marker) = player_marker {
         draw_player_marker(scene, camera, marker, size, frame);
     }
@@ -414,6 +437,10 @@ fn draw_tilemap_region(
     size: (u32, u32),
     frame: &mut [u8],
     frame_index: u64,
+    tone: &[f32; 4],
+    overlay: &[f32; 4],
+    opacity: u8,
+    blend_type: u8,
 ) {
     let Some(clip) = clip.clamp(size) else {
         return;
@@ -447,17 +474,29 @@ fn draw_tilemap_region(
             }
             let world_x = cam_x + x as f32;
             if world_x < 0.0 || world_x >= map_width_px as f32 {
-                set_pixel(frame, width, dest_x, dest_y, debug_pixel(dest_x, dest_y, width));
+                set_pixel(
+                    frame,
+                    width,
+                    dest_x,
+                    dest_y,
+                    debug_pixel(dest_x, dest_y, width),
+                );
                 continue;
             }
             let tile_x = (world_x as usize) / scene.tile_size;
             if tile_x >= scene.map_width {
-                set_pixel(frame, width, dest_x, dest_y, debug_pixel(dest_x, dest_y, width));
+                set_pixel(
+                    frame,
+                    width,
+                    dest_x,
+                    dest_y,
+                    debug_pixel(dest_x, dest_y, width),
+                );
                 continue;
             }
             let local_x = (world_x as usize) % scene.tile_size;
             let mut ground = [0, 0, 0, 0];
-            let mut overlay = [0, 0, 0, 0];
+            let mut overlay_pixels = [0, 0, 0, 0];
             for layer in &scene.layers {
                 let idx = tile_y * scene.map_width + tile_x;
                 if idx >= layer.len() {
@@ -475,17 +514,24 @@ fn draw_tilemap_region(
                 if priority == 0 {
                     blend_pixel(&mut ground, sample);
                 } else {
-                    blend_pixel(&mut overlay, sample);
+                    blend_pixel(&mut overlay_pixels, sample);
                 }
             }
             let mut final_color = ground;
-            if overlay[3] > 0 {
-                blend_pixel(&mut final_color, overlay);
+            if overlay_pixels[3] > 0 {
+                blend_pixel(&mut final_color, overlay_pixels);
             }
             if final_color[3] == 0 {
                 final_color = debug_pixel(dest_x, dest_y, width);
             }
-            set_pixel(frame, width, dest_x, dest_y, final_color);
+            final_color = apply_tone_and_color(final_color, tone, overlay);
+            if opacity < 255 {
+                final_color[3] = ((final_color[3] as u16 * opacity as u16) / 255) as u8;
+            }
+            let idx = (dest_y as usize * width + dest_x as usize) * 4;
+            let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];
+            blend_with_mode(&mut dst, final_color, blend_type);
+            frame[idx..idx + 4].copy_from_slice(&dst);
         }
     }
 }
@@ -497,7 +543,18 @@ fn draw_tilemaps(
     frame_index: u64,
 ) {
     for tilemap in tilemaps {
-        draw_tilemap_region(&tilemap.scene, tilemap.camera, tilemap.clip, size, frame, frame_index);
+        draw_tilemap_region(
+            &tilemap.scene,
+            tilemap.camera,
+            tilemap.clip,
+            size,
+            frame,
+            frame_index,
+            &tilemap.tone,
+            &tilemap.color,
+            tilemap.opacity,
+            tilemap.blend_type,
+        );
     }
 }
 
@@ -715,7 +772,7 @@ fn draw_sprite(size: (u32, u32), frame: &mut [u8], sprite: &SpriteInstance) {
             if sprite.bush_depth > 0 {
                 let local_y_px = src_y - src_top;
                 if local_y_px >= sprite.src_rect.3 as f32 - sprite.bush_depth as f32 {
-                    color[3] = (color[3] as u16 / 2) as u8;
+                    color[3] = ((color[3] as u16 * sprite.bush_opacity as u16) / 255) as u8;
                 }
             }
             color = apply_tone_and_color(color, &sprite.tone, &sprite.color);
@@ -738,12 +795,7 @@ fn draw_planes(size: (u32, u32), frame: &mut [u8], planes: &[PlaneInstance]) {
     }
 }
 
-fn draw_plane_instance(
-    size: (u32, u32),
-    frame: &mut [u8],
-    plane: &PlaneInstance,
-    clip: ClipRect,
-) {
+fn draw_plane_instance(size: (u32, u32), frame: &mut [u8], plane: &PlaneInstance, clip: ClipRect) {
     let texture = &plane.texture;
     let tex_w = texture.width() as i32;
     let tex_h = texture.height() as i32;
@@ -835,21 +887,19 @@ fn draw_window_background(
     let Some(target) = inner_rect.intersect(visible).and_then(|r| r.clamp(size)) else {
         return;
     };
-    let base_opacity =
-        ((window.opacity as u16 * window.back_opacity as u16) / 255).min(255) as u8;
+    let base_opacity = ((window.opacity as u16 * window.back_opacity as u16) / 255).min(255) as u8;
     if base_opacity == 0 {
         return;
     }
     for y in 0..target.height {
         let dest_y = target.y + y as i32;
         let local_y = dest_y - inner_rect.y;
-        let sample_y = WINDOW_BG_SRC.y
-            + wrap_coord(local_y as i32, WINDOW_BG_SRC.h as i32) as u32;
+        let sample_y = WINDOW_BG_SRC.y + wrap_coord(local_y as i32, WINDOW_BG_SRC.h as i32) as u32;
         for x in 0..target.width {
             let dest_x = target.x + x as i32;
             let local_x = dest_x - inner_rect.x;
-            let sample_x = WINDOW_BG_SRC.x
-                + wrap_coord(local_x as i32, WINDOW_BG_SRC.w as i32) as u32;
+            let sample_x =
+                WINDOW_BG_SRC.x + wrap_coord(local_x as i32, WINDOW_BG_SRC.w as i32) as u32;
             let mut color = skin.get_pixel(sample_x, sample_y).0;
             if color[3] == 0 {
                 continue;
@@ -915,9 +965,7 @@ fn draw_window_frame(
         );
     }
     // Edges: top, bottom, left, right
-    let horizontal_width = full_rect
-        .width
-        .saturating_sub((WINDOW_PADDING * 2) as u32);
+    let horizontal_width = full_rect.width.saturating_sub((WINDOW_PADDING * 2) as u32);
     if horizontal_width > 0 {
         let top = ClipRect::new(
             full_rect.x + WINDOW_PADDING,
@@ -954,9 +1002,7 @@ fn draw_window_frame(
             opacity,
         );
     }
-    let vertical_height = full_rect
-        .height
-        .saturating_sub((WINDOW_PADDING * 2) as u32);
+    let vertical_height = full_rect.height.saturating_sub((WINDOW_PADDING * 2) as u32);
     if vertical_height > 0 {
         let left = ClipRect::new(
             full_rect.x,

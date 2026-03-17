@@ -1,5 +1,3 @@
-require 'fileutils'
-
 # Minimal RGSS class surface to unblock scripts until native bindings land.
 module RGSS
   module Debug
@@ -10,6 +8,99 @@ module RGSS
       return if @warned[key]
       warn("[RGSS] #{label} is not implemented yet")
       @warned[key] = true
+    end
+  end
+end
+
+begin
+  require 'fileutils'
+rescue LoadError
+  module FileUtils
+    module_function
+
+    def mkdir_p(path)
+      return if path.nil? || path.empty?
+      segments = []
+      path_parts = path.split(File::SEPARATOR)
+      base = path.start_with?(File::SEPARATOR) ? File::SEPARATOR : ""
+      path_parts.each do |segment|
+        next if segment.nil? || segment.empty?
+        base = base == File::SEPARATOR ? File.join(base, segment) : File.join(base, segment)
+        next if Dir.exist?(base)
+        Dir.mkdir(base)
+      end
+    rescue SystemCallError
+      raise
+    end
+  end
+end
+
+module RGSS
+  module Runtime
+    class << self
+      attr_reader :main_fiber
+
+      def install_main(&block)
+        raise ArgumentError, 'rgss_main requires a block' unless block
+        @main_fiber = Fiber.new do
+          begin
+            block.call
+          ensure
+            @main_fiber = nil
+          end
+        end
+      end
+
+      def resume_main
+        fiber = @main_fiber
+        return false unless fiber
+        if fiber.alive?
+          fiber.resume
+          true
+        else
+          @main_fiber = nil
+          false
+        end
+      rescue Exception
+        @main_fiber = nil
+        raise
+      end
+
+      def yield_frame
+        fiber = @main_fiber
+        return unless fiber
+        current = Fiber.current
+        return unless current.equal?(fiber)
+        Fiber.yield
+      end
+
+      def active?
+        fiber = @main_fiber
+        fiber && fiber.alive?
+      end
+
+      def reset
+        @main_fiber = nil
+      end
+    end
+  end
+end
+
+class Hangup < Exception; end
+
+unless Numeric.method_defined?(:to_i)
+  class Numeric
+    def to_i
+      return self if is_a?(Integer)
+      self < 0 ? self.ceil : self.floor
+    end
+  end
+end
+
+unless String.method_defined?(:message)
+  class String
+    def message
+      self
     end
   end
 end
@@ -51,6 +142,23 @@ module Kernel
     dir = File.dirname(path)
     FileUtils.mkdir_p(dir) if dir && !dir.empty?
     path
+  end
+
+  if method_defined?(:rgss_stop) && !method_defined?(:__rgss_native_stop)
+    alias_method :__rgss_native_stop, :rgss_stop
+  end
+
+  def rgss_main(&block)
+    unless block
+      RGSS::Debug.warn_once('rgss_main requires a block')
+      return
+    end
+    RGSS::Runtime.install_main(&block)
+  end
+
+  def rgss_stop
+    RGSS::Runtime.reset
+    __rgss_native_stop if defined?(__rgss_native_stop)
   end
 end
 
@@ -238,7 +346,7 @@ class Font
   end
 
   def self.default_color=(value)
-    @@default_color = value.is_a?(Color) ? value : Color.new
+    @@default_color = value.is_a?(Color) ? value : Color.new(255, 255, 255, 255)
   end
 
   def initialize(name = nil, size = nil)
@@ -254,6 +362,19 @@ end
 class Bitmap
   attr_accessor :font
   attr_reader :native_id
+
+  @max_size = 16_384
+
+  class << self
+    def max_size(value = nil)
+      @max_size = value.to_i if value
+      @max_size
+    end
+
+    def max_size=(value)
+      @max_size = value.to_i
+    end
+  end
 
   class << self
     def _native_wrap(handle)
@@ -398,9 +519,9 @@ class Bitmap
   end
 
   def get_pixel(x, y)
-    return Color.new unless @native_id
+    return Color.new(0, 0, 0, 0) unless @native_id
     packed = RGSS::Native.bitmap_get_pixel(@native_id, x.to_i, y.to_i)
-    return Color.new unless packed
+    return Color.new(0, 0, 0, 0) unless packed
     r = packed & 0xFF
     g = (packed >> 8) & 0xFF
     b = (packed >> 16) & 0xFF
@@ -487,7 +608,7 @@ class Bitmap
   end
 
   def ensure_color(value)
-    value.is_a?(Color) ? value : Color.new
+    value.is_a?(Color) ? value : Color.new(0, 0, 0, 0)
   end
 
   def pack_color(color)
@@ -553,13 +674,15 @@ class Viewport
     @z = 0
     @ox = 0
     @oy = 0
-    @color = Color.new
+    @color = Color.new(0, 0, 0, 0)
     @tone = Tone.new
     @disposed = false
     @native_id = RGSS::Native.viewport_create(@rect.x, @rect.y, @rect.width, @rect.height)
     sync_rect
     sync_visible
     sync_z
+    sync_color
+    sync_tone
     sync_origin
   end
 
@@ -590,6 +713,16 @@ class Viewport
     sync_z
   end
 
+  def color=(value)
+    @color = value.is_a?(Color) ? value.dup : Color.new(0, 0, 0, 0)
+    sync_color
+  end
+
+  def tone=(value)
+    @tone = value.is_a?(Tone) ? value.dup : Tone.new
+    sync_tone
+  end
+
   def ox=(value)
     @ox = value.to_i
     RGSS::Native.viewport_set_ox(@native_id, @ox)
@@ -614,6 +747,14 @@ class Viewport
     RGSS::Native.viewport_set_z(@native_id, @z)
   end
 
+  def sync_color
+    RGSS::Native.viewport_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+  end
+
+  def sync_tone
+    RGSS::Native.viewport_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+  end
+
   def sync_origin
     RGSS::Native.viewport_set_ox(@native_id, @ox)
     RGSS::Native.viewport_set_oy(@native_id, @oy)
@@ -623,7 +764,7 @@ end
 class Sprite
   attr_reader :bitmap, :viewport, :color, :tone, :src_rect, :native_id
   attr_reader :x, :y, :z, :ox, :oy, :zoom_x, :zoom_y, :angle, :mirror,
-              :bush_depth, :opacity, :blend_type, :visible
+              :bush_depth, :bush_opacity, :opacity, :blend_type, :visible
 
   def initialize(viewport = nil)
     @viewport = viewport
@@ -635,10 +776,11 @@ class Sprite
     @angle = 0.0
     @mirror = false
     @bush_depth = 0
+    @bush_opacity = 128
     @opacity = 255
     @blend_type = 0
     @visible = true
-    @color = Color.new
+    @color = Color.new(0, 0, 0, 0)
     @tone = Tone.new
     @src_rect = Rect.new
     @disposed = false
@@ -664,6 +806,16 @@ class Sprite
   def bitmap=(bitmap)
     @bitmap = bitmap
     RGSS::Native.sprite_set_bitmap(@native_id, @bitmap&.native_id)
+  end
+
+  def width
+    return @src_rect.width if @bitmap.nil?
+    @bitmap.width
+  end
+
+  def height
+    return @src_rect.height if @bitmap.nil?
+    @bitmap.height
   end
 
   def x=(value)
@@ -716,6 +868,11 @@ class Sprite
     RGSS::Native.sprite_set_bush_depth(@native_id, @bush_depth)
   end
 
+  def bush_opacity=(value)
+    @bush_opacity = value.to_i.clamp(0, 255)
+    RGSS::Native.sprite_set_bush_opacity(@native_id, @bush_opacity)
+  end
+
   def opacity=(value)
     @opacity = value.to_i
     RGSS::Native.sprite_set_opacity(@native_id, @opacity)
@@ -737,7 +894,7 @@ class Sprite
   end
 
   def color=(value)
-    @color = value.is_a?(Color) ? value.dup : Color.new
+    @color = value.is_a?(Color) ? value.dup : Color.new(0, 0, 0, 0)
     RGSS::Native.sprite_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
   end
 
@@ -767,6 +924,7 @@ class Sprite
     RGSS::Native.sprite_set_angle(@native_id, @angle)
     RGSS::Native.sprite_set_mirror(@native_id, @mirror)
     RGSS::Native.sprite_set_bush_depth(@native_id, @bush_depth)
+    RGSS::Native.sprite_set_bush_opacity(@native_id, @bush_opacity)
     RGSS::Native.sprite_set_opacity(@native_id, @opacity)
     RGSS::Native.sprite_set_blend_type(@native_id, @blend_type)
     RGSS::Native.sprite_set_visible(@native_id, @visible)
@@ -792,7 +950,7 @@ class Plane < Sprite
     @blend_type = 0
     @visible = true
     @tone = Tone.new
-    @color = Color.new
+    @color = Color.new(0, 0, 0, 0)
     @disposed = false
     @native_id = RGSS::Native.plane_create(@viewport&.native_id)
     sync_all
@@ -864,7 +1022,7 @@ class Plane < Sprite
   end
 
   def color=(value)
-    @color = value.is_a?(Color) ? value.dup : Color.new
+    @color = value.is_a?(Color) ? value.dup : Color.new(0, 0, 0, 0)
     RGSS::Native.plane_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
   end
 
@@ -912,7 +1070,7 @@ class Window
     @contents = nil
     @cursor_rect = Rect.new
     @tone = Tone.new
-    @color = Color.new
+    @color = Color.new(0, 0, 0, 0)
     @viewport = viewport
     @disposed = false
     @native_id = RGSS::Native.window_create
@@ -1020,7 +1178,7 @@ class Window
   end
 
   def color=(value)
-    @color = value.is_a?(Color) ? value.dup : Color.new
+    @color = value.is_a?(Color) ? value.dup : Color.new(0, 0, 0, 0)
     RGSS::Native.window_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
   end
 
@@ -1067,7 +1225,7 @@ end
 
 class Tilemap
   attr_reader :viewport, :tileset, :autotiles, :bitmaps, :map_data, :flash_data,
-              :ox, :oy, :visible, :priorities, :native_id
+              :ox, :oy, :visible, :priorities, :opacity, :blend_type, :tone, :color, :native_id
 
   def initialize(viewport = nil)
     @viewport = viewport
@@ -1078,6 +1236,10 @@ class Tilemap
     @ox = 0
     @oy = 0
     @visible = true
+    @opacity = 255
+    @blend_type = 0
+    @tone = Tone.new
+    @color = Color.new(0, 0, 0, 0)
     @disposed = false
     @native_id = RGSS::Native.tilemap_create(@viewport&.native_id)
     @autotiles = AutotileProxy.new(self, 7)
@@ -1123,6 +1285,11 @@ class Tilemap
     sync_priorities
   end
 
+  def flash_data=(table)
+    @flash_data = table
+    sync_flash_data
+  end
+
   def ox=(value)
     @ox = value.to_i
     RGSS::Native.tilemap_set_ox(@native_id, @ox)
@@ -1136,6 +1303,26 @@ class Tilemap
   def visible=(value)
     @visible = !!value
     RGSS::Native.tilemap_set_visible(@native_id, @visible)
+  end
+
+  def opacity=(value)
+    @opacity = value.to_i.clamp(0, 255)
+    RGSS::Native.tilemap_set_opacity(@native_id, @opacity)
+  end
+
+  def blend_type=(value)
+    @blend_type = value.to_i
+    RGSS::Native.tilemap_set_blend_type(@native_id, @blend_type)
+  end
+
+  def tone=(value)
+    @tone = value.is_a?(Tone) ? value.dup : Tone.new
+    RGSS::Native.tilemap_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+  end
+
+  def color=(value)
+    @color = value.is_a?(Color) ? value.dup : Color.new(0, 0, 0, 0)
+    RGSS::Native.tilemap_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
   end
 
   def update
@@ -1155,6 +1342,11 @@ class Tilemap
     RGSS::Native.tilemap_set_ox(@native_id, @ox)
     RGSS::Native.tilemap_set_oy(@native_id, @oy)
     RGSS::Native.tilemap_set_visible(@native_id, @visible)
+    RGSS::Native.tilemap_set_opacity(@native_id, @opacity)
+    RGSS::Native.tilemap_set_blend_type(@native_id, @blend_type)
+    RGSS::Native.tilemap_set_tone(@native_id, @tone.red, @tone.green, @tone.blue, @tone.gray)
+    RGSS::Native.tilemap_set_color(@native_id, @color.red, @color.green, @color.blue, @color.alpha)
+    sync_flash_data
   end
 
   def sync_map_data
@@ -1174,6 +1366,16 @@ class Tilemap
       @native_id,
       @priorities.xsize,
       @priorities.to_native_s16
+    )
+  end
+
+  def sync_flash_data
+    return unless @flash_data
+    RGSS::Native.tilemap_set_flash_data(
+      @native_id,
+      @flash_data.xsize,
+      @flash_data.ysize,
+      @flash_data.to_native_s16
     )
   end
 

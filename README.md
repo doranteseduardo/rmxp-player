@@ -9,9 +9,9 @@ cross-platform Rust crates.
 ## Feature Highlights
 
 - **True RGSS Compatibility** – An embedded Ruby 3.2 (MRI) VM plus a native
-  `RGSS::Native` bridge mirror the stock `Graphics`, `Bitmap`, `Viewport`,
-  `Sprite`, `Plane`, `Window`, and `Tilemap` classes. Real `Scripts.rxdata`
-  files run unmodified and control every on-screen object.
+  `RGSS::Native` bridge mirror the stock `System`, `Graphics`, `Bitmap`,
+  `Viewport`, `Sprite`, `Plane`, `Window`, and `Tilemap` classes. Real
+  `Scripts.rxdata` files run unmodified and control every on-screen object.
 - **Multiplatform Rendering Loop** – A unified `winit + pixels (wgpu)` backend
   drives Metal (macOS/iOS), Vulkan/DX12 (Windows/Linux), and GLES/Vulkan
   (Android) with a strict 640×480 logical surface and pixel-perfect scaling.
@@ -62,6 +62,7 @@ crates/
 | Area                          | Status | Notes |
 |-------------------------------|--------|-------|
 | Cargo workspace / tooling     | ✅      | Multi-crate layout with `cargo workspace` + shared `clippy`/`fmt` config. |
+| System module                 | ✅      | Native `System` exposes VERSION, window hooks, directories, `puts`, and telemetry equivalents to mkxp-z. |
 | Graphics built-ins            | ✅      | `Graphics`, `Bitmap`, `Viewport`, `Sprite`, `Plane`, `Window`, `Tilemap` mirror RGSS behavior, including tone/flash, windowskins, zoom/rotation/mirror, autotile animation, etc. |
 | RGSS data loading             | ✅      | `rmxp-data` reads Marshal 4.8 for `System`, `MapInfos`, map layers, tilesets/priorities. |
 | Tilemap renderer              | ✅      | Priorities, autotiles, multi-layer composition, per-map scroll/viewport handling. |
@@ -78,7 +79,7 @@ crates/
 | Tool / Library | Notes |
 |----------------|-------|
 | Rust 1.75+     | Install via [rustup](https://rustup.rs/) (MSRV follows stable). |
-| Ruby 3.2 (MRI) | Required for `rb-sys`. Install via rbenv/rvm/RVM/Homebrew/RVM, then expose via env vars. |
+| Ruby 3.2 (MRI) | Required for `rb-sys`. Install via rbenv/rvm/Homebrew, then expose via env vars (see below). |
 | Ruby dev libs  | Ruby headers + `libruby` must be discoverable. Homebrew installs place them under `/opt/homebrew/opt/ruby@3.2`. |
 | Platform deps  | Metal SDK (macOS/iOS), Vulkan/DirectX drivers (Windows/Linux), Android NDK (for mobile builds). |
 
@@ -88,6 +89,8 @@ Set up Ruby for `rb-sys`:
 export RB_SYS_RUBY_VERSION=3.2
 export RUBY=$HOME/.rvm/rubies/ruby-3.2.0/bin/ruby   # adjust to your install
 ```
+
+If you use `rvm`, remember to `rvm use 3.2.0 --install` first so `libruby.3.2.dylib` is compiled for your host SDK (mkxp-z expects macOS 11+ compatible slices). For Homebrew Ruby, point `RUBY=/opt/homebrew/opt/ruby@3.2/bin/ruby` and ensure `pkg-config` sees `/opt/homebrew/opt/ruby@3.2/lib/pkgconfig`.
 
 ---
 
@@ -127,12 +130,13 @@ falls back to the native tile scene so you can still visualize assets.
 
 ## Development Tips
 
-| Task                 | Command |
-|----------------------|---------|
-| Format all crates    | `cargo fmt` |
-| Lint (workspace)     | `cargo clippy --all-targets --all-features` |
-| Desktop smoke run    | `RMXP_GAME_PATH=… cargo run -p desktop-runner` |
-| Check without running| `cargo check` |
+| Task                      | Command |
+|---------------------------|---------|
+| Format all crates         | `cargo fmt` |
+| Lint (workspace)          | `cargo clippy --all-targets --all-features` |
+| Desktop smoke run         | `RMXP_GAME_PATH=… cargo run -p desktop-runner` |
+| Check without running     | `cargo check` |
+| Verify RGSS bridge only   | `cargo test -p rgss-bindings --lib system::*` (more suites coming) |
 
 Extra tips:
 
@@ -142,23 +146,28 @@ Extra tips:
 - The renderer captures every backbuffer; `Graphics.snap_to_bitmap` returns a
   real `Bitmap` (saved in the RGSS handle store) so vanilla screenshot code
   works.
+- You can sanity check Ruby availability with `ruby -v` and verify `pkg-config --libs ruby-3.2` resolves before building.
 
 ---
 
 ## Roadmap
 
-1. **Scene Loop Integration** – Execute `Main`, wire Game_Map/Game_Player, and
+1. **RGSS 1:1 Alignment** – Continue migrating the remaining built-ins
+   (`Color`, `Tone`, `Rect`, `Table`, `Font`, `Bitmap`, `Viewport`, `Sprite`,
+   `Plane`, `Window`, `Tilemap`, `Audio`, `Input`) from the Ruby shim to native
+   bindings so the runtime matches mkxp-z behavior byte-for-byte.
+2. **Scene Loop Integration** – Execute `Main`, wire Game_Map/Game_Player, and
    run the interpreter so player movement/events/UI flow originate entirely in
    Ruby.
-2. **Audio Playback** – Implement RGSS `Audio.*` channels on top of Rodio/CPAL
+3. **Audio Playback** – Implement RGSS `Audio.*` channels on top of Rodio/CPAL
    (loop points, fades, ME ducking, MIDI via `rustysynth` with bundled
    SoundFonts).
-3. **Event/Interpreter Core** – Native helpers for passability, collision, and
+4. **Event/Interpreter Core** – Native helpers for passability, collision, and
    message/input handling that Ruby can call into for performance-sensitive
    operations.
-4. **Persistence & Config** – Save slots, config options (resolution, control
+5. **Persistence & Config** – Save slots, config options (resolution, control
    remaps, touch overlays), and sandbox-safe storage across desktop/mobile.
-5. **Mobile Shells** – Ship Swift/Kotlin launchers that expose document pickers,
+6. **Mobile Shells** – Ship Swift/Kotlin launchers that expose document pickers,
    lifecycle callbacks, sandboxed storage, and background audio permissions.
 
 Contributions are welcome—open an issue or PR with the subsystem you’d like to

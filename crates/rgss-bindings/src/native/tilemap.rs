@@ -1,4 +1,6 @@
-use super::{native_module, value_to_bool, value_to_i32, HandleStore};
+use super::{
+    native_module, value_to_bool, value_to_f32, value_to_i32, ColorData, HandleStore, ToneData,
+};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use rb_sys::VALUE;
@@ -12,7 +14,7 @@ extern "C" {
         argc: c_int,
     );
     fn rb_string_value_ptr(value: *mut VALUE) -> *const c_char;
-    fn rb_str_len(value: VALUE) -> isize;
+    fn rb_str_strlen(value: VALUE) -> isize;
 }
 
 const CREATE_NAME: &[u8] = b"tilemap_create\0";
@@ -25,6 +27,11 @@ const SET_PRIORITIES_NAME: &[u8] = b"tilemap_set_priorities\0";
 const SET_OX_NAME: &[u8] = b"tilemap_set_ox\0";
 const SET_OY_NAME: &[u8] = b"tilemap_set_oy\0";
 const SET_VISIBLE_NAME: &[u8] = b"tilemap_set_visible\0";
+const SET_OPACITY_NAME: &[u8] = b"tilemap_set_opacity\0";
+const SET_BLEND_TYPE_NAME: &[u8] = b"tilemap_set_blend_type\0";
+const SET_COLOR_NAME: &[u8] = b"tilemap_set_color\0";
+const SET_TONE_NAME: &[u8] = b"tilemap_set_tone\0";
+const SET_FLASH_DATA_NAME: &[u8] = b"tilemap_set_flash_data\0";
 const UPDATE_NAME: &[u8] = b"tilemap_update\0";
 
 static TILEMAPS: Lazy<HandleStore<TilemapData>> = Lazy::new(HandleStore::default);
@@ -36,9 +43,14 @@ pub struct TilemapData {
     pub autotile_ids: [Option<u32>; 7],
     pub map: Option<TilemapGrid>,
     pub priorities: Vec<i16>,
+    pub flash: Option<TilemapFlash>,
     pub ox: i32,
     pub oy: i32,
     pub visible: bool,
+    pub opacity: i32,
+    pub blend_type: i32,
+    pub tone: ToneData,
+    pub color: ColorData,
     pub disposed: bool,
 }
 
@@ -49,6 +61,13 @@ pub struct TilemapGrid {
     pub layers: Vec<Vec<i16>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct TilemapFlash {
+    pub width: usize,
+    pub height: usize,
+    pub values: Vec<i16>,
+}
+
 impl Default for TilemapData {
     fn default() -> Self {
         Self {
@@ -57,9 +76,14 @@ impl Default for TilemapData {
             autotile_ids: [None; 7],
             map: None,
             priorities: Vec::new(),
+            flash: None,
             ox: 0,
             oy: 0,
             visible: true,
+            opacity: 255,
+            blend_type: 0,
+            tone: ToneData::default(),
+            color: ColorData::default(),
             disposed: false,
         }
     }
@@ -114,6 +138,26 @@ unsafe fn define_tilemap_api() -> Result<()> {
         c_name(SET_VISIBLE_NAME),
         Some(tilemap_set_visible),
         2,
+    );
+    rb_define_module_function(
+        native,
+        c_name(SET_OPACITY_NAME),
+        Some(tilemap_set_opacity),
+        2,
+    );
+    rb_define_module_function(
+        native,
+        c_name(SET_BLEND_TYPE_NAME),
+        Some(tilemap_set_blend_type),
+        2,
+    );
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(tilemap_set_color), 5);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(tilemap_set_tone), 5);
+    rb_define_module_function(
+        native,
+        c_name(SET_FLASH_DATA_NAME),
+        Some(tilemap_set_flash_data),
+        4,
     );
     rb_define_module_function(native, c_name(UPDATE_NAME), Some(tilemap_update), 1);
     Ok(())
@@ -189,7 +233,7 @@ unsafe extern "C" fn tilemap_set_map_data(argc: c_int, argv: *const VALUE, _self
     if ptr.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let len = rb_str_len(blob).max(0) as usize;
+    let len = rb_str_strlen(blob).max(0) as usize;
     let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
     let total = width * height * layers;
     let mut values = Vec::with_capacity(total);
@@ -237,7 +281,7 @@ unsafe extern "C" fn tilemap_set_priorities(
     if ptr.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let len = rb_str_len(blob).max(0) as usize;
+    let len = rb_str_strlen(blob).max(0) as usize;
     let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
     let mut values = Vec::with_capacity(size);
     for idx in 0..size {
@@ -283,6 +327,102 @@ unsafe extern "C" fn tilemap_set_visible(argc: c_int, argv: *const VALUE, _self:
     let id = value_to_i32(args[0]) as u32;
     let visible = value_to_bool(args[1]);
     TILEMAPS.with_mut(id, |tilemap| tilemap.visible = visible);
+    rb_sys::Qnil as VALUE
+}
+
+macro_rules! tilemap_setter {
+    ($name:ident, $field:ident, $convert:expr) => {
+        unsafe extern "C" fn $name(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+            if argc != 2 || argv.is_null() {
+                return rb_sys::Qnil as VALUE;
+            }
+            let args = std::slice::from_raw_parts(argv, 2);
+            let id = value_to_i32(args[0]) as u32;
+            let value = $convert(args[1]);
+            TILEMAPS.with_mut(id, |tilemap| {
+                tilemap.$field = value;
+            });
+            rb_sys::Qnil as VALUE
+        }
+    };
+}
+
+tilemap_setter!(tilemap_set_opacity, opacity, |val| value_to_i32(val));
+tilemap_setter!(tilemap_set_blend_type, blend_type, |val| value_to_i32(val));
+
+unsafe extern "C" fn tilemap_set_color(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 5 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, 5);
+    let id = value_to_i32(args[0]) as u32;
+    let color = ColorData::new(
+        value_to_f32(args[1]),
+        value_to_f32(args[2]),
+        value_to_f32(args[3]),
+        value_to_f32(args[4]),
+    );
+    TILEMAPS.with_mut(id, |tilemap| tilemap.color = color);
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn tilemap_set_tone(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 5 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, 5);
+    let id = value_to_i32(args[0]) as u32;
+    let tone = ToneData::new(
+        value_to_f32(args[1]),
+        value_to_f32(args[2]),
+        value_to_f32(args[3]),
+        value_to_f32(args[4]),
+    );
+    TILEMAPS.with_mut(id, |tilemap| tilemap.tone = tone);
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn tilemap_set_flash_data(
+    argc: c_int,
+    argv: *const VALUE,
+    _self: VALUE,
+) -> VALUE {
+    if argc != 4 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, 4);
+    let id = value_to_i32(args[0]) as u32;
+    let width = value_to_i32(args[1]).max(0) as usize;
+    let height = value_to_i32(args[2]).max(0) as usize;
+    let mut blob = args[3];
+    let ptr = rb_string_value_ptr(&mut blob);
+    if ptr.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let len = rb_str_strlen(blob).max(0) as usize;
+    let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
+    let total = width * height;
+    let mut values = Vec::with_capacity(total);
+    for idx in 0..total {
+        let offset = idx * 2;
+        let value = if offset + 1 < bytes.len() {
+            i16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+        } else {
+            0
+        };
+        values.push(value);
+    }
+    TILEMAPS.with_mut(id, |tilemap| {
+        if width == 0 || height == 0 {
+            tilemap.flash = None;
+        } else {
+            tilemap.flash = Some(TilemapFlash {
+                width,
+                height,
+                values,
+            });
+        }
+    });
     rb_sys::Qnil as VALUE
 }
 

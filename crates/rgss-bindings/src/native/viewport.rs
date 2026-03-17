@@ -1,4 +1,7 @@
-use super::{native_module, value_to_bool, value_to_i32, HandleStore, RectData};
+use super::{
+    native_module, value_to_bool, value_to_f32, value_to_i32, ColorData, HandleStore, RectData,
+    ToneData,
+};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use rb_sys::VALUE;
@@ -20,6 +23,8 @@ const SET_VISIBLE_NAME: &[u8] = b"viewport_set_visible\0";
 const SET_Z_NAME: &[u8] = b"viewport_set_z\0";
 const SET_OX_NAME: &[u8] = b"viewport_set_ox\0";
 const SET_OY_NAME: &[u8] = b"viewport_set_oy\0";
+const SET_COLOR_NAME: &[u8] = b"viewport_set_color\0";
+const SET_TONE_NAME: &[u8] = b"viewport_set_tone\0";
 
 static VIEWPORTS: Lazy<HandleStore<ViewportData>> = Lazy::new(HandleStore::default);
 
@@ -30,6 +35,8 @@ pub struct ViewportData {
     pub oy: i32,
     pub z: i32,
     pub visible: bool,
+    pub color: ColorData,
+    pub tone: ToneData,
     pub disposed: bool,
 }
 
@@ -41,6 +48,8 @@ impl Default for ViewportData {
             oy: 0,
             z: 0,
             visible: true,
+            color: ColorData::default(),
+            tone: ToneData::default(),
             disposed: false,
         }
     }
@@ -68,6 +77,8 @@ unsafe fn define_viewport_api() -> Result<()> {
     rb_define_module_function(native, c_name(SET_Z_NAME), Some(viewport_set_z), 2);
     rb_define_module_function(native, c_name(SET_OX_NAME), Some(viewport_set_ox), 2);
     rb_define_module_function(native, c_name(SET_OY_NAME), Some(viewport_set_oy), 2);
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(viewport_set_color), 5);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(viewport_set_tone), 5);
     Ok(())
 }
 
@@ -165,6 +176,42 @@ unsafe extern "C" fn viewport_set_oy(argc: c_int, argv: *const VALUE, _self: VAL
     let value = value_to_i32(args[1]);
     VIEWPORTS.with_mut(id, |vp| {
         vp.oy = value;
+    });
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn viewport_set_color(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 5 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, 5);
+    let id = value_to_i32(args[0]) as u32;
+    let color = ColorData::new(
+        value_to_f32(args[1]),
+        value_to_f32(args[2]),
+        value_to_f32(args[3]),
+        value_to_f32(args[4]),
+    );
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.color = color;
+    });
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn viewport_set_tone(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc != 5 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, 5);
+    let tone = ToneData::new(
+        value_to_f32(args[1]),
+        value_to_f32(args[2]),
+        value_to_f32(args[3]),
+        value_to_f32(args[4]),
+    );
+    let id = value_to_i32(args[0]) as u32;
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.tone = tone;
     });
     rb_sys::Qnil as VALUE
 }
