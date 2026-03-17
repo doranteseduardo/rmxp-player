@@ -47,6 +47,11 @@ Environment variables:
 - `RMXP_START_MAP` – optional override for the map ID to boot (defaults to `System.rxdata` start map).
 - `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
 
+Window & camera:
+
+- Default window size is 640×480 to match vanilla RMXP. The renderer keeps a 1:1
+  pixel scale and centers the player while clamping scroll at map edges.
+
 Controls:
 
 - Arrow keys or WASD – move the debug player marker across the tilemap.

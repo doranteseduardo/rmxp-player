@@ -1,5 +1,5 @@
 use crate::input::InputState;
-use render::{PlayerMarker, RenderFrame, TileScene};
+use render::{Camera, PlayerMarker, RenderFrame, TileScene};
 use std::time::Duration;
 
 const PLAYER_SPEED_TILES_PER_SEC: f32 = 4.0;
@@ -8,14 +8,16 @@ pub struct GameState {
     scene: Option<TileScene>,
     player: GamePlayer,
     player_color: [u8; 4],
+    viewport: (u32, u32),
 }
 
 impl GameState {
-    pub fn new(scene: Option<TileScene>, start: (f32, f32)) -> Self {
+    pub fn new(scene: Option<TileScene>, start: (f32, f32), viewport: (u32, u32)) -> Self {
         Self {
             scene,
             player: GamePlayer::new(start),
             player_color: [0, 255, 255, 180],
+            viewport,
         }
     }
 
@@ -28,13 +30,32 @@ impl GameState {
 
     pub fn render_frame(&self) -> Option<RenderFrame<'_>> {
         let scene = self.scene.as_ref()?;
+        let camera = self.camera(scene);
         Some(RenderFrame {
             scene,
+            camera,
             player_marker: Some(PlayerMarker {
                 tile_pos: self.player.position,
                 color: self.player_color,
             }),
         })
+    }
+
+    fn camera(&self, scene: &TileScene) -> Camera {
+        let tile_px = scene.tile_size as f32;
+        let map_px_w = scene.map_width as f32 * tile_px;
+        let map_px_h = scene.map_height as f32 * tile_px;
+        let viewport_w = self.viewport.0 as f32;
+        let viewport_h = self.viewport.1 as f32;
+        let player_center_x = (self.player.position.0 + 0.5) * tile_px;
+        let player_center_y = (self.player.position.1 + 0.5) * tile_px;
+        let max_x = (map_px_w - viewport_w).max(0.0);
+        let max_y = (map_px_h - viewport_h).max(0.0);
+        let origin_x = player_center_x - viewport_w / 2.0;
+        let origin_y = player_center_y - viewport_h / 2.0;
+        Camera {
+            origin: (origin_x.clamp(0.0, max_x), origin_y.clamp(0.0, max_y)),
+        }
     }
 }
 

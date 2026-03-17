@@ -93,7 +93,11 @@ pub fn run(config: AppConfig) -> Result<()> {
         None => (None, (0.0, 0.0)),
     };
 
-    let mut game = GameState::new(tile_scene, player_start);
+    let mut game = GameState::new(
+        tile_scene,
+        player_start,
+        (cfg.window_width, cfg.window_height),
+    );
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);

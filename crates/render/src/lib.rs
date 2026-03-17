@@ -14,7 +14,13 @@ pub struct Renderer<'a> {
 
 pub struct RenderFrame<'a> {
     pub scene: &'a TileScene,
+    pub camera: Camera,
     pub player_marker: Option<PlayerMarker>,
+}
+
+#[derive(Clone, Copy)]
+pub struct Camera {
+    pub origin: (f32, f32),
 }
 
 #[derive(Clone, Copy)]
@@ -102,6 +108,7 @@ impl<'a> Renderer<'a> {
         match frame_data {
             Some(data) => draw_tile_scene(
                 data.scene,
+                data.camera,
                 data.player_marker.as_ref(),
                 self.logical_size,
                 frame,
@@ -134,8 +141,20 @@ fn debug_pixel(x: usize, y: usize, width: usize) -> [u8; 4] {
     [xx, yy, 0x80, 0xFF]
 }
 
+fn set_pixel(frame: &mut [u8], width: usize, x: usize, y: usize, color: [u8; 4]) {
+    let offset = (y * width + x) * 4;
+    frame[offset..offset + 4].copy_from_slice(&color);
+}
+
+fn fill_background_line(frame: &mut [u8], width: usize, y: usize) {
+    for x in 0..width {
+        set_pixel(frame, width, x, y, debug_pixel(x, y, width));
+    }
+}
+
 fn draw_tile_scene(
     scene: &TileScene,
+    camera: Camera,
     player_marker: Option<&PlayerMarker>,
     size: (u32, u32),
     frame: &mut [u8],
@@ -149,14 +168,32 @@ fn draw_tile_scene(
         draw_gradient(size, frame, 0);
         return;
     }
+    let cam_x = camera.origin.0.max(0.0);
+    let cam_y = camera.origin.1.max(0.0);
     for y in 0..height {
-        let map_y = y * map_height_px / height;
+        let world_y = cam_y + y as f32;
+        if world_y < 0.0 || world_y >= map_height_px as f32 {
+            fill_background_line(frame, width, y);
+            continue;
+        }
+        let tile_y = (world_y as usize) / scene.tile_size;
+        if tile_y >= scene.map_height {
+            fill_background_line(frame, width, y);
+            continue;
+        }
+        let local_y = (world_y as usize) % scene.tile_size;
         for x in 0..width {
-            let map_x = x * map_width_px / width;
-            let tile_x = map_x / scene.tile_size;
-            let tile_y = map_y / scene.tile_size;
-            let local_x = map_x % scene.tile_size;
-            let local_y = map_y % scene.tile_size;
+            let world_x = cam_x + x as f32;
+            if world_x < 0.0 || world_x >= map_width_px as f32 {
+                set_pixel(frame, width, x, y, debug_pixel(x, y, width));
+                continue;
+            }
+            let tile_x = (world_x as usize) / scene.tile_size;
+            if tile_x >= scene.map_width {
+                set_pixel(frame, width, x, y, debug_pixel(x, y, width));
+                continue;
+            }
+            let local_x = (world_x as usize) % scene.tile_size;
             let mut ground = [0, 0, 0, 0];
             let mut overlay = [0, 0, 0, 0];
             for layer in &scene.layers {
@@ -186,12 +223,11 @@ fn draw_tile_scene(
             if final_color[3] == 0 {
                 final_color = debug_pixel(x, y, width);
             }
-            let offset = (y * width + x) * 4;
-            frame[offset..offset + 4].copy_from_slice(&final_color);
+            set_pixel(frame, width, x, y, final_color);
         }
     }
     if let Some(marker) = player_marker {
-        draw_player_marker(scene, marker, size, frame);
+        draw_player_marker(scene, camera, marker, size, frame);
     }
 }
 
@@ -246,28 +282,32 @@ fn blend_pixel(dst: &mut [u8; 4], src: [u8; 4]) {
 
 fn draw_player_marker(
     scene: &TileScene,
+    camera: Camera,
     marker: &PlayerMarker,
     size: (u32, u32),
     frame: &mut [u8],
 ) {
     let tile_px = scene.tile_size as f32;
-    let map_width_px = (scene.map_width as f32 * tile_px).max(1.0);
-    let map_height_px = (scene.map_height as f32 * tile_px).max(1.0);
-    let px_x = marker.tile_pos.0 * tile_px;
-    let px_y = marker.tile_pos.1 * tile_px;
-    let screen_x = ((px_x / map_width_px) * size.0 as f32).clamp(0.0, size.0 as f32 - 1.0) as usize;
-    let screen_y =
-        ((px_y / map_height_px) * size.1 as f32).clamp(0.0, size.1 as f32 - 1.0) as usize;
-    let marker_width = std::cmp::max(scene.map_width, 1) as u32;
-    let marker_size = (size.0 / marker_width).max(4).min(24) as usize;
+    let player_px_x = (marker.tile_pos.0 + 0.5) * tile_px;
+    let player_px_y = (marker.tile_pos.1 + 0.5) * tile_px;
+    let screen_x = player_px_x - camera.origin.0;
+    let screen_y = player_px_y - camera.origin.1;
+    if screen_x < 0.0 || screen_y < 0.0 || screen_x >= size.0 as f32 || screen_y >= size.1 as f32 {
+        return;
+    }
+    let center_x = screen_x as isize;
+    let center_y = screen_y as isize;
+    let marker_size = 6isize;
     let width = size.0 as usize;
-    let y_start = screen_y.saturating_sub(marker_size / 2);
-    let y_end = (screen_y + marker_size / 2).min(std::cmp::max(size.1 as usize, 1) - 1);
-    let x_start = screen_x.saturating_sub(marker_size / 2);
-    let x_end = (screen_x + marker_size / 2).min(width.saturating_sub(1));
-    for y in y_start..=y_end {
-        for x in x_start..=x_end {
-            let offset = (y * width + x) * 4;
+    for y in (center_y - marker_size)..=(center_y + marker_size) {
+        if y < 0 || y >= size.1 as isize {
+            continue;
+        }
+        for x in (center_x - marker_size)..=(center_x + marker_size) {
+            if x < 0 || x >= size.0 as isize {
+                continue;
+            }
+            let offset = (y as usize * width + x as usize) * 4;
             let dst = &mut frame[offset..offset + 4];
             let mut color = [dst[0], dst[1], dst[2], dst[3]];
             blend_pixel(&mut color, marker.color);

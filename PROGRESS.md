@@ -17,8 +17,9 @@
   autotiles) into pixels so we can visualize `.rxdata` content end-to-end.
 - Renderer handles autotile sampling/animation, multi-layer composition, and
   RGSS priority tables so ground/overlay layers display correctly.
-- Desktop runner hosts a fixed 60 Hz update loop with keyboard input (arrows or
-  WASD) driving a placeholder player marker for movement debugging.
+- Desktop runner hosts a fixed 60 Hz loop with keyboard input (arrows/WASD),
+  pixel-perfect camera scroll (640×480 viewport), and a placeholder player
+  marker to visualize movement on real maps.
 
 ## 🚧 Immediate Goals
 
