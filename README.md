@@ -11,6 +11,7 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 - ✅ Winit + Pixels desktop loop rendering a placeholder gradient.
 - ✅ Rodio audio backend initialization stub.
 - ✅ Platform helper for config directories and logging bootstrap.
+- ✅ `rmxp-data` crate with a Marshal (Ruby 4.8) parser + JSON helpers.
 - 🚧 Pending: real RGSS embedding, map renderer, input mapping, event system,
   audio playback, save/load, and mobile launchers.
 
@@ -25,6 +26,7 @@ crates/
   render/              # Pixels-based renderer abstraction
   audio/               # Rodio/CPAL audio system stub
   platform/            # Config directories, logging, persistence helpers
+  data/                # Marshal reader + typed Ruby value utilities
   rgss-bindings/       # Placeholder Ruby/RGSS bridge
   mobile-shell/        # Future iOS/Android launch helpers
 ```

@@ -6,6 +6,7 @@ members = [
     "crates/audio",
     "crates/platform",
     "crates/mobile-shell",
+    "crates/data",
     "apps/desktop-runner",
 ]
 resolver = "2"

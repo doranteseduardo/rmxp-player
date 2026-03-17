@@ -1531,6 +1531,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmxp-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "rodio"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -11,11 +11,13 @@
   logging with `RMXP_LOG` filtering.
 - RGSS bindings crate contains a stub `RubyVm` placeholder for the future MRI
   embedding layer.
+- Added `rmxp-data` crate with a Marshal reader/JSON bridge to inspect `.rxdata`
+  contents.
 
 ## 🚧 Immediate Goals
 
-1. **Resource & Data Pipeline** – port the Marshal reader + typed models and wire
-   them into the engine loading path.
+1. **Resource Loader Integration** – plug `rmxp-data` into `engine-core` and load
+   real RMXP database/system files.
 2. **Rendering Roadmap** – replace the gradient with tilemap + sprite batching
    using actual RMXP assets and Table data.
 3. **Input & Loop** – encode fixed-timestep scheduling, keyboard/gamepad/touch
