@@ -6,7 +6,7 @@ use input::InputState;
 use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
-use rgss_bindings::{update_input, RubyVm};
+use rgss_bindings::{sync_graphics_size, update_input, RubyVm, ScriptSection};
 use rmxp_data::{MapData, SystemData};
 use std::{
     env,
@@ -113,10 +113,37 @@ pub fn run(config: AppConfig) -> Result<()> {
 
     let window_ptr: *mut winit::window::Window = Box::into_raw(window);
     let mut renderer = Renderer::new(unsafe { &*window_ptr }, cfg.window_width, cfg.window_height)?;
+    sync_graphics_size(cfg.window_width, cfg.window_height);
+    rgss_bindings::sync_graphics_size(cfg.window_width, cfg.window_height);
     let _audio = AudioSystem::new()?;
 
     let mut ruby_vm = RubyVm::new();
     ruby_vm.boot()?;
+    if let Some(project_ref) = project.as_ref() {
+        match project_ref.load_scripts() {
+            Ok(scripts) => {
+                info!(
+                    target: "project",
+                    scripts = scripts.len(),
+                    "scripts parsed"
+                );
+                let sections: Vec<_> = scripts
+                    .iter()
+                    .map(|entry| ScriptSection {
+                        id: entry.id,
+                        name: entry.name.as_str(),
+                        source: entry.source.as_str(),
+                    })
+                    .collect();
+                if let Err(err) = ruby_vm.run_scripts(&sections) {
+                    warn!(target: "rgss", error = %err, "Failed to evaluate RGSS scripts");
+                }
+            }
+            Err(err) => {
+                warn!(target: "project", error = %err, "Failed to load Scripts.rxdata");
+            }
+        }
+    }
 
     let mut input = WinitInputHelper::new();
     let mut input_state = InputState::default();

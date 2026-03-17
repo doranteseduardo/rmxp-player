@@ -1,5 +1,7 @@
 use crate::RubyValue;
 use anyhow::{anyhow, Context, Result};
+use flate2::read::ZlibDecoder;
+use std::io::Read;
 
 #[derive(Debug, Clone)]
 pub struct SystemData {
@@ -41,6 +43,13 @@ pub struct MapData {
     pub height: i32,
     pub tileset_id: i32,
     pub data: TableData,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScriptEntry {
+    pub id: i32,
+    pub name: String,
+    pub source: String,
 }
 
 pub fn parse_system(value: &RubyValue) -> Result<SystemData> {
@@ -158,6 +167,33 @@ pub fn parse_map(value: &RubyValue) -> Result<MapData> {
     })
 }
 
+pub fn parse_scripts(value: &RubyValue) -> Result<Vec<ScriptEntry>> {
+    let list = match value {
+        RubyValue::Array(items) => items,
+        _ => return Err(anyhow!("Scripts.rxdata is not an array")),
+    };
+    let mut scripts = Vec::with_capacity(list.len());
+    for entry in list {
+        let RubyValue::Array(fields) = entry else {
+            continue;
+        };
+        if fields.len() < 3 {
+            continue;
+        }
+        let id = value_to_i32(&fields[0]).unwrap_or(scripts.len() as i32);
+        let name = extract_script_name(&fields[1]).unwrap_or_else(|| format!("Script {}", id));
+        let source = match &fields[2] {
+            RubyValue::String(bytes) => decode_script_source(&bytes.bytes)?,
+            RubyValue::Nil => String::new(),
+            other => {
+                return Err(anyhow!("unexpected script payload type: {:?}", other));
+            }
+        };
+        scripts.push(ScriptEntry { id, name, source });
+    }
+    Ok(scripts)
+}
+
 impl TableData {
     pub fn new(xsize: usize, ysize: usize, zsize: usize, values: Vec<i16>) -> Self {
         Self {
@@ -232,6 +268,33 @@ fn parse_table(value: &RubyValue) -> Result<TableData> {
             parse_table_bytes(data)
         }
         _ => Err(anyhow!("expected Table user-defined value")),
+    }
+}
+
+fn extract_script_name(value: &RubyValue) -> Option<String> {
+    match value {
+        RubyValue::String(s) => Some(s.to_string_lossy()),
+        RubyValue::Symbol(sym) => Some(sym.clone()),
+        RubyValue::Nil => None,
+        _ => None,
+    }
+}
+
+fn decode_script_source(bytes: &[u8]) -> Result<String> {
+    if bytes.is_empty() {
+        return Ok(String::new());
+    }
+    let mut decoder = ZlibDecoder::new(bytes);
+    let mut buffer = Vec::new();
+    match decoder.read_to_end(&mut buffer) {
+        Ok(_) => match String::from_utf8(buffer) {
+            Ok(text) => Ok(text),
+            Err(err) => {
+                let bytes = err.into_bytes();
+                Ok(String::from_utf8_lossy(&bytes).into_owned())
+            }
+        },
+        Err(_) => Ok(String::from_utf8_lossy(bytes).into_owned()),
     }
 }
 

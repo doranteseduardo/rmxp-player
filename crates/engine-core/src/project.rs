@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use image::{ImageReader, RgbaImage};
 use rmxp_data::{
-    load_file, parse_map, parse_map_infos, parse_system, parse_tilesets, MapData, MapInfoEntry,
-    RubyValue, SystemData, TilesetData,
+    load_file, parse_map, parse_map_infos, parse_scripts, parse_system, parse_tilesets, MapData,
+    MapInfoEntry, RubyValue, ScriptEntry, SystemData, TilesetData,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -51,6 +51,12 @@ impl GameProject {
         let path = self.data_dir().join(filename);
         let value = load_file(&path).with_context(|| format!("loading {}", path.display()))?;
         parse_map(&value)
+    }
+
+    pub fn load_scripts(&self) -> Result<Vec<ScriptEntry>> {
+        let path = self.data_dir().join("Scripts.rxdata");
+        let value = load_file(&path).with_context(|| format!("loading {}", path.display()))?;
+        parse_scripts(&value).context("parsing Scripts.rxdata")
     }
 
     pub fn load_database(&self) -> Result<GameDatabase> {

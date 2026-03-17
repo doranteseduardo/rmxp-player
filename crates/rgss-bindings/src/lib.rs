@@ -2,6 +2,8 @@
 
 mod graphics;
 mod input;
+mod kernel;
+mod scripts;
 
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
@@ -14,7 +16,7 @@ use std::{
     os::raw::{c_char, c_int},
     ptr::addr_of_mut,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 static RUBY_INIT: OnceCell<()> = OnceCell::new();
 
@@ -23,8 +25,18 @@ pub use input::{
     BUTTON_RIGHT, BUTTON_UP,
 };
 
+pub fn sync_graphics_size(width: u32, height: u32) {
+    graphics::set_screen_size(width, height);
+}
+
 pub struct RubyVm {
     booted: bool,
+}
+
+pub struct ScriptSection<'a> {
+    pub id: i32,
+    pub name: &'a str,
+    pub source: &'a str,
 }
 
 impl RubyVm {
@@ -38,8 +50,10 @@ impl RubyVm {
         if !self.booted {
             info!(target: "rgss", "Ruby VM initialised");
             graphics::init()?;
+            kernel::init()?;
             input::init()?;
             self.booted = true;
+            scripts::load(self)?;
         }
         Ok(())
     }
@@ -62,6 +76,14 @@ impl RubyVm {
 
     pub fn is_booted(&self) -> bool {
         self.booted
+    }
+
+    pub fn run_scripts<'a>(&self, sections: &[ScriptSection<'a>]) -> Result<()> {
+        ensure_ruby()?;
+        for section in sections {
+            eval_section(section)?;
+        }
+        Ok(())
     }
 }
 
@@ -92,4 +114,29 @@ unsafe fn current_exception_message() -> String {
     let mut string = rb_obj_as_string(err);
     let ptr = rb_string_value_cstr(&mut string);
     CStr::from_ptr(ptr).to_string_lossy().into_owned()
+}
+
+fn eval_section(section: &ScriptSection<'_>) -> Result<()> {
+    let label = script_label(section);
+    debug!(target: "rgss", id = section.id, name = %label, "Evaluating script");
+    let script = CString::new(section.source.as_bytes())
+        .map_err(|_| anyhow!("script {label} contains interior null byte"))?;
+    let mut state: c_int = 0;
+    unsafe {
+        rb_eval_string_protect(script.as_ptr(), &mut state);
+        if state != 0 {
+            let message = current_exception_message();
+            return Err(anyhow!("Ruby error in script {label}: {message}"));
+        }
+    }
+    Ok(())
+}
+
+fn script_label(section: &ScriptSection<'_>) -> String {
+    let name = section.name.trim();
+    if name.is_empty() {
+        format!("Script {}", section.id)
+    } else {
+        name.to_string()
+    }
 }

@@ -1693,6 +1693,7 @@ name = "rmxp-data"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "serde",
  "serde_json",
  "thiserror",
