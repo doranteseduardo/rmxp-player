@@ -5,7 +5,10 @@ use super::common::{
 use crate::native::{value_to_f32, ColorData};
 use anyhow::Result;
 use once_cell::sync::{Lazy, OnceCell};
-use rb_sys::{bindings::rb_obj_class, VALUE};
+use rb_sys::{
+    bindings::{rb_ary_new_capa, rb_ary_push, rb_obj_class},
+    VALUE,
+};
 use std::{
     ffi::{c_void, CStr},
     os::raw::c_int,
@@ -43,6 +46,8 @@ static METHOD_EQUAL: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"==\0") });
 static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
+static METHOD_TO_A: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
 
 #[derive(Clone)]
 struct ColorValue {
@@ -80,6 +85,7 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_ALPHA_SET, color_set_alpha, 1);
         define_method(klass, *METHOD_EQUAL, color_equal, 1);
         define_method(klass, *METHOD_DUP, color_dup, 0);
+        define_method(klass, *METHOD_TO_A, color_to_a, 0);
     }
     Ok(())
 }
@@ -149,22 +155,26 @@ fn update_color(obj: VALUE, args: &[VALUE]) {
     let mut blue = 0.0;
     let mut alpha = 255.0;
     if !args.is_empty() {
-        red = value_to_f32(args[0]);
+        red = clamp_component(value_to_f32(args[0]));
     }
     if args.len() >= 2 {
-        green = value_to_f32(args[1]);
+        green = clamp_component(value_to_f32(args[1]));
     }
     if args.len() >= 3 {
-        blue = value_to_f32(args[2]);
+        blue = clamp_component(value_to_f32(args[2]));
     }
     if args.len() >= 4 {
-        alpha = value_to_f32(args[3]);
+        alpha = clamp_component(value_to_f32(args[3]));
     }
     let color = get_color_mut(obj);
     color.red = red;
     color.green = green;
     color.blue = blue;
     color.alpha = alpha;
+}
+
+fn clamp_component(value: f32) -> f32 {
+    value.clamp(0.0, 255.0)
 }
 
 macro_rules! component_getter {
@@ -182,7 +192,7 @@ macro_rules! component_setter {
                 return rb_sys::Qnil as VALUE;
             }
             let value = *argv;
-            get_color_mut(self_value).$field = value_to_f32(value);
+            get_color_mut(self_value).$field = clamp_component(value_to_f32(value));
             value
         }
     };
@@ -197,6 +207,16 @@ component_setter!(color_set_red, red);
 component_setter!(color_set_green, green);
 component_setter!(color_set_blue, blue);
 component_setter!(color_set_alpha, alpha);
+
+unsafe extern "C" fn color_to_a(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let color = get_color_mut(self_value).clone();
+    let array = rb_ary_new_capa(4);
+    rb_ary_push(array, float_to_value(color.red as f64));
+    rb_ary_push(array, float_to_value(color.green as f64));
+    rb_ary_push(array, float_to_value(color.blue as f64));
+    rb_ary_push(array, float_to_value(color.alpha as f64));
+    array
+}
 
 unsafe extern "C" fn color_equal(_argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
     let args = if argv.is_null() {

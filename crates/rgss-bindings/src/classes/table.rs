@@ -92,25 +92,37 @@ fn get_table_mut(value: VALUE) -> &'static mut TableValue {
 }
 
 unsafe extern "C" fn table_initialize(argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
-    resize_table(self_value, argc, argv);
+    resize_table(self_value, argc, argv, true);
     self_value
 }
 
 unsafe extern "C" fn table_resize(argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
-    resize_table(self_value, argc, argv);
+    resize_table(self_value, argc, argv, false);
     self_value
 }
 
-unsafe fn resize_table(obj: VALUE, argc: c_int, argv: *const VALUE) {
+unsafe fn resize_table(obj: VALUE, argc: c_int, argv: *const VALUE, initializing: bool) {
     let args = if argc <= 0 || argv.is_null() {
         &[]
     } else {
         slice::from_raw_parts(argv, argc as usize)
     };
     let table = get_table_mut(obj);
-    table.xsize = args.get(0).map(|v| value_to_i32(*v).max(0)).unwrap_or(0);
-    table.ysize = args.get(1).map(|v| value_to_i32(*v).max(1)).unwrap_or(1);
-    table.zsize = args.get(2).map(|v| value_to_i32(*v).max(1)).unwrap_or(1);
+    let default_x = if initializing { 0 } else { table.xsize };
+    let default_y = if initializing { 1 } else { table.ysize.max(1) };
+    let default_z = if initializing { 1 } else { table.zsize.max(1) };
+    table.xsize = args
+        .get(0)
+        .map(|&v| value_to_i32(v).max(0))
+        .unwrap_or(default_x);
+    table.ysize = args
+        .get(1)
+        .map(|&v| value_to_i32(v).max(1))
+        .unwrap_or(default_y);
+    table.zsize = args
+        .get(2)
+        .map(|&v| value_to_i32(v).max(1))
+        .unwrap_or(default_z);
     let total = (table.xsize as usize)
         .saturating_mul(table.ysize as usize)
         .saturating_mul(table.zsize as usize);
@@ -141,7 +153,7 @@ unsafe extern "C" fn table_set(argc: c_int, argv: *const VALUE, self_value: VALU
     let x = value_to_i32(args[0]);
     let y = value_to_i32(args[1]);
     let z = value_to_i32(args[2]);
-    let value = value_to_i32(args[3]) as i16;
+    let value = clamp_to_i16(value_to_i32(args[3]));
     let table = get_table_mut(self_value);
     if let Some(idx) = index_of(table, x, y, z) {
         table.data[idx] = value;
@@ -193,4 +205,27 @@ fn index_of(table: &TableValue, x: i32, y: i32, z: i32) -> Option<usize> {
         + y as usize * table.xsize as usize
         + z as usize * table.xsize as usize * table.ysize as usize;
     Some(idx)
+}
+
+#[derive(Clone)]
+pub struct TableSnapshot {
+    pub xsize: i32,
+    pub ysize: i32,
+    pub zsize: i32,
+    pub data: Vec<i16>,
+}
+
+pub fn table_snapshot(value: VALUE) -> Option<TableSnapshot> {
+    unsafe { get_typed_data::<TableValue>(value, TABLE_TYPE.as_rb_type()) }.map(|table| {
+        TableSnapshot {
+            xsize: table.xsize,
+            ysize: table.ysize,
+            zsize: table.zsize,
+            data: table.data.clone(),
+        }
+    })
+}
+
+fn clamp_to_i16(value: i32) -> i16 {
+    value.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }

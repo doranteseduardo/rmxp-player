@@ -1,13 +1,13 @@
 pub(crate) mod bitmap;
 mod handles;
 mod module;
-mod plane;
+pub(crate) mod plane;
 pub(crate) mod sprite;
-mod tilemap;
+pub(crate) mod tilemap;
 mod types;
 mod util;
 pub(crate) mod viewport;
-mod window;
+pub(crate) mod window;
 
 use anyhow::Result;
 

@@ -102,6 +102,94 @@ pub fn snapshot() -> Vec<(u32, WindowData)> {
     WINDOWS.snapshot()
 }
 
+pub fn create() -> u32 {
+    WINDOWS.insert(WindowData::default())
+}
+
+pub fn dispose(id: u32) {
+    WINDOWS.with_mut(id, |window| window.disposed = true);
+}
+
+pub fn set_viewport(id: u32, viewport: Option<u32>) {
+    WINDOWS.with_mut(id, |window| window.viewport_id = viewport);
+}
+
+pub fn set_windowskin(id: u32, bitmap: Option<u32>) {
+    WINDOWS.with_mut(id, |window| window.windowskin_id = bitmap);
+}
+
+pub fn set_contents(id: u32, bitmap: Option<u32>) {
+    WINDOWS.with_mut(id, |window| window.contents_id = bitmap);
+}
+
+pub fn set_x(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.x = value);
+}
+
+pub fn set_y(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.y = value);
+}
+
+pub fn set_z(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.z = value);
+}
+
+pub fn set_width(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.width = value.max(0));
+}
+
+pub fn set_height(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.height = value.max(0));
+}
+
+pub fn set_ox(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.ox = value);
+}
+
+pub fn set_oy(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.oy = value);
+}
+
+pub fn set_opacity(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.opacity = value);
+}
+
+pub fn set_back_opacity(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.back_opacity = value);
+}
+
+pub fn set_contents_opacity(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.contents_opacity = value);
+}
+
+pub fn set_openness(id: u32, value: i32) {
+    WINDOWS.with_mut(id, |window| window.openness = value);
+}
+
+pub fn set_visible(id: u32, value: bool) {
+    WINDOWS.with_mut(id, |window| window.visible = value);
+}
+
+pub fn set_active(id: u32, value: bool) {
+    WINDOWS.with_mut(id, |window| window.active = value);
+}
+
+pub fn set_pause(id: u32, value: bool) {
+    WINDOWS.with_mut(id, |window| window.pause = value);
+}
+
+pub fn set_tone(id: u32, tone: ToneData) {
+    WINDOWS.with_mut(id, |window| window.tone = tone);
+}
+
+pub fn set_color(id: u32, color: ColorData) {
+    WINDOWS.with_mut(id, |window| window.color = color);
+}
+
+pub fn set_cursor_rect(id: u32, rect: RectData) {
+    WINDOWS.with_mut(id, |window| window.cursor_rect = rect);
+}
+
 unsafe fn define_window_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(CREATE_NAME), Some(window_create), 0);

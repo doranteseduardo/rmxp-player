@@ -2,11 +2,14 @@ mod bitmap;
 mod color;
 pub mod common;
 mod font;
+mod plane;
 mod rect;
 mod sprite;
 mod table;
+mod tilemap;
 mod tone;
 mod viewport;
+mod window;
 
 use anyhow::Result;
 
@@ -19,5 +22,8 @@ pub fn init() -> Result<()> {
     bitmap::init()?;
     viewport::init()?;
     sprite::init()?;
+    plane::init()?;
+    window::init()?;
+    tilemap::init()?;
     Ok(())
 }

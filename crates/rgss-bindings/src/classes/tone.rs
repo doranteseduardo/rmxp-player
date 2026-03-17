@@ -5,7 +5,10 @@ use super::common::{
 use crate::native::{value_to_f32, ToneData};
 use anyhow::Result;
 use once_cell::sync::{Lazy, OnceCell};
-use rb_sys::{bindings::rb_obj_class, VALUE};
+use rb_sys::{
+    bindings::{rb_ary_new_capa, rb_ary_push, rb_obj_class},
+    VALUE,
+};
 use std::{
     ffi::{c_void, CStr},
     os::raw::c_int,
@@ -43,6 +46,8 @@ static METHOD_EQUAL: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"==\0") });
 static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
+static METHOD_TO_A: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
 
 #[derive(Clone)]
 struct ToneValue {
@@ -80,6 +85,7 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_GRAY_SET, tone_set_gray, 1);
         define_method(klass, *METHOD_EQUAL, tone_equal, 1);
         define_method(klass, *METHOD_DUP, tone_dup, 0);
+        define_method(klass, *METHOD_TO_A, tone_to_a, 0);
     }
     Ok(())
 }
@@ -123,19 +129,27 @@ unsafe extern "C" fn tone_set(argc: c_int, argv: *const VALUE, self_value: VALUE
 fn update_tone(obj: VALUE, args: &[VALUE]) {
     let mut value = ToneValue::default();
     if !args.is_empty() {
-        value.red = value_to_f32(args[0]);
+        value.red = clamp_rgb(value_to_f32(args[0]));
     }
     if args.len() >= 2 {
-        value.green = value_to_f32(args[1]);
+        value.green = clamp_rgb(value_to_f32(args[1]));
     }
     if args.len() >= 3 {
-        value.blue = value_to_f32(args[2]);
+        value.blue = clamp_rgb(value_to_f32(args[2]));
     }
     if args.len() >= 4 {
-        value.gray = value_to_f32(args[3]);
+        value.gray = clamp_gray(value_to_f32(args[3]));
     }
     let tone = get_tone_mut(obj);
     *tone = value;
+}
+
+fn clamp_rgb(value: f32) -> f32 {
+    value.clamp(-255.0, 255.0)
+}
+
+fn clamp_gray(value: f32) -> f32 {
+    value.clamp(0.0, 255.0)
 }
 
 macro_rules! tone_getter {
@@ -147,13 +161,13 @@ macro_rules! tone_getter {
 }
 
 macro_rules! tone_setter {
-    ($name:ident, $field:ident) => {
+    ($name:ident, $field:ident, $clamp:ident) => {
         unsafe extern "C" fn $name(_argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
             if argv.is_null() {
                 return rb_sys::Qnil as VALUE;
             }
             let value = *argv;
-            get_tone_mut(self_value).$field = value_to_f32(value);
+            get_tone_mut(self_value).$field = $clamp(value_to_f32(value));
             value
         }
     };
@@ -164,10 +178,10 @@ tone_getter!(tone_get_green, green);
 tone_getter!(tone_get_blue, blue);
 tone_getter!(tone_get_gray, gray);
 
-tone_setter!(tone_set_red, red);
-tone_setter!(tone_set_green, green);
-tone_setter!(tone_set_blue, blue);
-tone_setter!(tone_set_gray, gray);
+tone_setter!(tone_set_red, red, clamp_rgb);
+tone_setter!(tone_set_green, green, clamp_rgb);
+tone_setter!(tone_set_blue, blue, clamp_rgb);
+tone_setter!(tone_set_gray, gray, clamp_gray);
 
 unsafe extern "C" fn tone_equal(_argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
     let args = if argv.is_null() {
@@ -197,6 +211,16 @@ unsafe extern "C" fn tone_dup(_argc: c_int, _argv: *const VALUE, self_value: VAL
     let target = get_tone_mut(new_obj);
     *target = source;
     new_obj
+}
+
+unsafe extern "C" fn tone_to_a(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let tone = get_tone_mut(self_value).clone();
+    let array = rb_ary_new_capa(4);
+    rb_ary_push(array, float_to_value(tone.red as f64));
+    rb_ary_push(array, float_to_value(tone.green as f64));
+    rb_ary_push(array, float_to_value(tone.blue as f64));
+    rb_ary_push(array, float_to_value(tone.gray as f64));
+    array
 }
 
 pub fn new_tone(red: f32, green: f32, blue: f32, gray: f32) -> VALUE {

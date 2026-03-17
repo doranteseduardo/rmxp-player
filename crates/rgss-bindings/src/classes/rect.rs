@@ -5,7 +5,10 @@ use super::common::{
 use crate::native::{value_to_i32, RectData};
 use anyhow::Result;
 use once_cell::sync::{Lazy, OnceCell};
-use rb_sys::{bindings::rb_obj_class, VALUE};
+use rb_sys::{
+    bindings::{rb_ary_new_capa, rb_ary_push, rb_obj_class},
+    VALUE,
+};
 use std::{
     ffi::{c_void, CStr},
     os::raw::c_int,
@@ -29,6 +32,8 @@ static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
 static METHOD_EQUAL: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"==\0") });
+static METHOD_TO_A: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
 static METHOD_X: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"x\0") });
 static METHOD_X_SET: Lazy<&'static CStr> =
@@ -83,6 +88,7 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_EMPTY, rect_empty, 0);
         define_method(klass, *METHOD_DUP, rect_dup, 0);
         define_method(klass, *METHOD_EQUAL, rect_equal, 1);
+        define_method(klass, *METHOD_TO_A, rect_to_a, 0);
     }
     Ok(())
 }
@@ -190,6 +196,16 @@ unsafe extern "C" fn rect_equal(_argc: c_int, argv: *const VALUE, self_value: VA
         );
     }
     bool_to_value(false)
+}
+
+unsafe extern "C" fn rect_to_a(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let rect = get_rect_mut(self_value).clone();
+    let array = rb_ary_new_capa(4);
+    rb_ary_push(array, int_to_value(rect.x as i64));
+    rb_ary_push(array, int_to_value(rect.y as i64));
+    rb_ary_push(array, int_to_value(rect.width as i64));
+    rb_ary_push(array, int_to_value(rect.height as i64));
+    array
 }
 
 pub fn new_rect(x: i32, y: i32, width: i32, height: i32) -> VALUE {

@@ -77,6 +77,66 @@ pub fn snapshot() -> Vec<(u32, PlaneData)> {
     PLANES.snapshot()
 }
 
+pub fn create(viewport: Option<u32>) -> u32 {
+    let mut data = PlaneData::default();
+    data.viewport_id = viewport;
+    PLANES.insert(data)
+}
+
+pub fn dispose(id: u32) {
+    PLANES.with_mut(id, |plane| {
+        plane.disposed = true;
+    });
+}
+
+pub fn set_viewport(id: u32, viewport: Option<u32>) {
+    PLANES.with_mut(id, |plane| plane.viewport_id = viewport);
+}
+
+pub fn set_bitmap(id: u32, bitmap: Option<u32>) {
+    PLANES.with_mut(id, |plane| plane.bitmap_id = bitmap);
+}
+
+pub fn set_z(id: u32, value: i32) {
+    PLANES.with_mut(id, |plane| plane.z = value);
+}
+
+pub fn set_ox(id: u32, value: f32) {
+    PLANES.with_mut(id, |plane| plane.ox = value);
+}
+
+pub fn set_oy(id: u32, value: f32) {
+    PLANES.with_mut(id, |plane| plane.oy = value);
+}
+
+pub fn set_zoom_x(id: u32, value: f32) {
+    PLANES.with_mut(id, |plane| plane.zoom_x = value);
+}
+
+pub fn set_zoom_y(id: u32, value: f32) {
+    PLANES.with_mut(id, |plane| plane.zoom_y = value);
+}
+
+pub fn set_opacity(id: u32, value: i32) {
+    PLANES.with_mut(id, |plane| plane.opacity = value);
+}
+
+pub fn set_blend_type(id: u32, value: i32) {
+    PLANES.with_mut(id, |plane| plane.blend_type = value);
+}
+
+pub fn set_visible(id: u32, value: bool) {
+    PLANES.with_mut(id, |plane| plane.visible = value);
+}
+
+pub fn set_color(id: u32, color: ColorData) {
+    PLANES.with_mut(id, |plane| plane.color = color);
+}
+
+pub fn set_tone(id: u32, tone: ToneData) {
+    PLANES.with_mut(id, |plane| plane.tone = tone);
+}
+
 unsafe fn define_plane_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(CREATE_NAME), Some(plane_create), 1);

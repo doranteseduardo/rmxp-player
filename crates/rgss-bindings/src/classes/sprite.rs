@@ -9,7 +9,7 @@ use super::{
     tone::{clone_tone, is_tone, new_tone, tone_data},
     viewport::{is_viewport, viewport_handle},
 };
-use crate::native::{self, value_to_bool, value_to_f32, value_to_i32, ColorData, RectData};
+use crate::native::{self, value_to_bool, value_to_f32, value_to_i32, RectData};
 use anyhow::Result;
 use once_cell::sync::OnceCell;
 use rb_sys::{bindings::rb_gc_mark, VALUE};
@@ -105,6 +105,8 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"ox=\0"), sprite_set_ox, 1);
         define_method(klass, cstr(b"oy\0"), sprite_get_oy, 0);
         define_method(klass, cstr(b"oy=\0"), sprite_set_oy, 1);
+        define_method(klass, cstr(b"width\0"), sprite_get_width, 0);
+        define_method(klass, cstr(b"height\0"), sprite_get_height, 0);
         define_method(klass, cstr(b"zoom_x\0"), sprite_get_zoom_x, 0);
         define_method(klass, cstr(b"zoom_x=\0"), sprite_set_zoom_x, 1);
         define_method(klass, cstr(b"zoom_y\0"), sprite_get_zoom_y, 0);
@@ -327,6 +329,24 @@ sprite_int_setter!(sprite_set_opacity, opacity, set_opacity);
 sprite_int_setter!(sprite_set_blend_type, blend_type, set_blend_type);
 sprite_bool_setter!(sprite_set_visible, visible, set_visible);
 
+unsafe extern "C" fn sprite_get_width(
+    _argc: c_int,
+    _argv: *const VALUE,
+    self_value: VALUE,
+) -> VALUE {
+    let (width, _) = sprite_dimensions(self_value);
+    int_to_value(width as i64)
+}
+
+unsafe extern "C" fn sprite_get_height(
+    _argc: c_int,
+    _argv: *const VALUE,
+    self_value: VALUE,
+) -> VALUE {
+    let (_, height) = sprite_dimensions(self_value);
+    int_to_value(height as i64)
+}
+
 unsafe extern "C" fn sprite_get_viewport(
     _argc: c_int,
     _argv: *const VALUE,
@@ -516,6 +536,19 @@ fn apply_all(sprite: &SpriteValue) {
     native::sprite::set_src_rect(sprite.handle, rect_data);
     native::sprite::set_color(sprite.handle, get_color_data(sprite.color));
     native::sprite::set_tone(sprite.handle, tone_data(sprite.tone));
+}
+
+fn sprite_dimensions(value: VALUE) -> (i32, i32) {
+    let sprite = get_sprite(value);
+    if sprite.bitmap != rb_sys::Qnil as VALUE {
+        if let Some(handle) = bitmap_handle(sprite.bitmap) {
+            if let Some((width, height)) = native::bitmap::dimensions(handle) {
+                return (width as i32, height as i32);
+            }
+        }
+    }
+    let rect = rect::rect_data(sprite.src_rect).unwrap_or_else(|| RectData::new(0, 0, 0, 0));
+    (rect.width, rect.height)
 }
 
 fn slice_from<'a>(argc: c_int, argv: *const VALUE) -> &'a [VALUE] {
