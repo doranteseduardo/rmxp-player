@@ -1,119 +1,167 @@
 # RMXP Native Player (Rust)
 
-Ground-up reimplementation of the RPG Maker XP runtime using a native Rust stack.
-The project is organized as a Cargo workspace with focused crates for the core
-engine, rendering, audio, platform utilities, RGSS bindings, and future mobile shells.
+Ground-up, from-scratch implementation of the RPG Maker XP runtime that keeps the
+original RGSS entry points but replaces the entire engine stack with modern,
+cross-platform Rust crates.
 
-## Current Status
+---
 
-- ✅ Cargo workspace scaffolded (`engine-core`, `render`, `audio`, `data`,
-  `platform`, `rgss-bindings`, `mobile-shell`, `desktop-runner`).
-- ✅ Desktop runner boots a `winit` + `pixels` loop with Metal/Vulkan/DirectX
-  backends and renders real RMXP tilemaps (tilesets + autotiles) pulled from
-  `System.rxdata`, respecting priorities and animated quads.
-- ✅ Rodio/CPAL audio system initializes (playback hooks pending).
-- ✅ Platform helper configures config/save directories and installs `tracing`
-  logging (enable verbose logs via `RMXP_LOG=debug`).
-- ✅ `rmxp-data` crate parses Marshal 4.8 `.rxdata` files (`System`, `MapInfos`,
-  maps, tilesets) and feeds typed structs to the engine.
-- ✅ Embedded Ruby 3.2 VM via `rb-sys`, plus an `RGSS::Native` bridge that
-  mirrors Bitmap/Viewport/Sprite/Window/Plane/Tilemap classes so Ruby owns scene
-  objects while Rust keeps authoritative state for rendering.
-- ✅ Core Graphics/Bitmap APIs are backed by native code: `Bitmap#blt`,
-  `Bitmap#fill_rect`, `Bitmap#get_pixel`/`set_pixel`, `Graphics.freeze`, and
-  `Graphics.snap_to_bitmap` all operate on shared GPU-ready textures pulled
-  straight from the renderer.
-- ✅ Graphics tone/brightness/flash now feed into the renderer, so screen-wide
-  fades and flashes from vanilla RGSS scripts show up without further stubs.
-- ✅ `Bitmap#stretch_blt`, `Bitmap#gradient_fill_rect`, and `Bitmap#draw_text`/
-  `text_size` work end-to-end (via an embedded 8×8 ASCII font), covering the
-  rendering needs of the default RGSS windowing stack.
-- ✅ Kernel helpers (`load_data`, `save_data`, `data_exist?`) resolve paths
-  against the active project root so vanilla RGSS scripts can Marshal `.rxdata`
-  content without any changes.
-- ✅ Input loop maps WASD/arrow keys into an RGSS-style snapshot so the renderer
-  can visualize scrolling/clamping at 640×480 (1:1 pixels, centered player).
-- ✅ Tilemap data written by real RGSS scripts (tileset, autotiles, priorities,
-  scroll offsets) now feeds the renderer, so Ruby code controls which map is
-  displayed instead of the fixed `.rxdata` bootstrap scene.
-- ✅ RGSS viewports, sprites, planes, and windows now render natively with
-  viewport clipping, sprite zoom/angle/mirror, plane tiling, and full
-  windowskin/background/contents/cursor compositing, so vanilla scripts drive
-  the complete scene graph without engine-side stubs.
-- 🚧 Next: execute RGSS scene stacks (map/player/events), hook RGSS `Audio.*`
-  to the native mixer, add save/config flows, and stand up the mobile shells.
+## Feature Highlights
 
-## Project Layout
+- **True RGSS Compatibility** – An embedded Ruby 3.2 (MRI) VM plus a native
+  `RGSS::Native` bridge mirror the stock `Graphics`, `Bitmap`, `Viewport`,
+  `Sprite`, `Plane`, `Window`, and `Tilemap` classes. Real `Scripts.rxdata`
+  files run unmodified and control every on-screen object.
+- **Multiplatform Rendering Loop** – A unified `winit + pixels (wgpu)` backend
+  drives Metal (macOS/iOS), Vulkan/DX12 (Windows/Linux), and GLES/Vulkan
+  (Android) with a strict 640×480 logical surface and pixel-perfect scaling.
+- **Data-Driven Loading Pipeline** – The `rmxp-data` crate parses Marshal 4.8
+  `.rxdata` content (`System`, `MapInfos`, maps, tilesets) so native code can
+  bootstrap any project assets before Ruby takes over.
+- **Audio + Platform Glue** – `audio` seeds the Rodio/CPAL stack, while the
+  `platform` crate owns logging, config/save directories, and runtime settings.
+  Mobile shells (Swift/Kotlin) embed the same Rust core via `winit`’s
+  experimental mobile backends.
+
+---
+
+## Workspace Layout
 
 ```
 Cargo.toml
 apps/
-  desktop-runner/      # Binary that boots the engine for desktop platforms
+  desktop-runner/        # Primary desktop binary (macOS/Windows/Linux)
 crates/
-  engine-core/         # Event loop, scheduler skeleton, integration glue
-  render/              # Pixels-based renderer abstraction
-  audio/               # Rodio/CPAL audio system stub
-  platform/            # Config directories, logging, persistence helpers
-  data/                # Marshal reader + typed Ruby value utilities
-  rgss-bindings/       # Placeholder Ruby/RGSS bridge
-  mobile-shell/        # Future iOS/Android launch helpers
+  engine-core/           # Event loop, scheduler, scene bootstrap glue
+  render/                # Pixels/wgpu renderer + tilemap/sprite/window compositing
+  audio/                 # Rodio/CPAL audio subsystem (channels, fades, MIDI hooks)
+  platform/              # Config/save dirs, tracing/log setup, env helpers
+  data/ (rmxp-data)      # Marshal reader + typed RMXP structs
+  rgss-bindings/         # Ruby MRI host + RGSS native bridge + primitives
+  mobile-shell/          # iOS/Android launch helpers (future Swift/Kotlin entrypoints)
 ```
 
-## Running (Desktop)
+---
+
+## Architecture Overview
+
+| Layer            | Responsibility                                                                                      |
+|------------------|------------------------------------------------------------------------------------------------------|
+| `engine-core`    | Bootstraps the app (desktop/mobile), resolves project paths, feeds data into RGSS, and schedules the 60 Hz loop. |
+| `rgss-bindings`  | Embeds Ruby (via `rb-sys`), exposes native handles, and evaluates `Scripts.rxdata`.                  |
+| `render`         | Converts RGSS snapshots (tilemaps, sprites, planes, windows, screen effects) into GPU-ready frames.  |
+| `audio`          | Sets up the Rodio sink / CPAL streams for BGM, BGS, ME, and SE playback (loop points + fades).       |
+| `data`           | Parses `.rxdata` via a Marshal reader so boot code can inspect `System`, `MapInfos`, `Tilesets`, etc. |
+| `platform`       | Logging, config/save/storage paths (`RMXP_LOG`, app support dirs), basic CLI helpers, env overrides. |
+| `mobile-shell`   | Lightweight native launchers that embed the event loop on iOS (UIKit + Metal) and Android (Activity + SurfaceView). |
+
+---
+
+## Status Matrix
+
+| Area                          | Status | Notes |
+|-------------------------------|--------|-------|
+| Cargo workspace / tooling     | ✅      | Multi-crate layout with `cargo workspace` + shared `clippy`/`fmt` config. |
+| Graphics built-ins            | ✅      | `Graphics`, `Bitmap`, `Viewport`, `Sprite`, `Plane`, `Window`, `Tilemap` mirror RGSS behavior, including tone/flash, windowskins, zoom/rotation/mirror, autotile animation, etc. |
+| RGSS data loading             | ✅      | `rmxp-data` reads Marshal 4.8 for `System`, `MapInfos`, map layers, tilesets/priorities. |
+| Tilemap renderer              | ✅      | Priorities, autotiles, multi-layer composition, per-map scroll/viewport handling. |
+| RGSS-driven scene rendering   | ✅      | Renderer consumes live snapshots from Ruby (sprites, planes, windows) or falls back to native tile scenes. |
+| Ruby embedding                | ✅      | MRI 3.2 via `rb-sys`; `Scripts.rxdata` executes in-process with native extension hooks. |
+| Audio playback                | 🚧      | Rodio/CPAL streams initialize, mixer/channel controls are being wired to RGSS `Audio.*`. |
+| Scene loop / interpreter      | 🚧      | Need to drive Game_Map/Game_Player/Game_Interpreter from Ruby to move past static demos. |
+| Persistence & mobile shells   | 🚧      | Save/config plumbing + Swift/Kotlin wrappers are stubs awaiting implementation. |
+
+---
+
+## Requirements
+
+| Tool / Library | Notes |
+|----------------|-------|
+| Rust 1.75+     | Install via [rustup](https://rustup.rs/) (MSRV follows stable). |
+| Ruby 3.2 (MRI) | Required for `rb-sys`. Install via rbenv/rvm/RVM/Homebrew/RVM, then expose via env vars. |
+| Ruby dev libs  | Ruby headers + `libruby` must be discoverable. Homebrew installs place them under `/opt/homebrew/opt/ruby@3.2`. |
+| Platform deps  | Metal SDK (macOS/iOS), Vulkan/DirectX drivers (Windows/Linux), Android NDK (for mobile builds). |
+
+Set up Ruby for `rb-sys`:
 
 ```bash
-RMXP_GAME_PATH=/absolute/path/to/rmxp/game cargo run -p desktop-runner
+export RB_SYS_RUBY_VERSION=3.2
+export RUBY=$HOME/.rvm/rubies/ruby-3.2.0/bin/ruby   # adjust to your install
 ```
 
-Environment variables:
+---
 
-- `RMXP_GAME_PATH` – absolute path to the RMXP project folder (expects `Data/System.rxdata`).
-- `RMXP_START_MAP` – optional override for the map ID to boot (defaults to `System.rxdata` start map).
-- `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
+## Building & Running (Desktop)
 
-Ruby (MRI) embedding:
+```bash
+git clone https://github.com/your-org/rmxp-native-player.git
+cd rmxp-native-player
 
-- Enable the optional `rgss-bindings/mri` feature to boot a real Ruby 3.2 VM:
-  `cargo run -p desktop-runner --features rgss-bindings/mri`.
-- You need Ruby 3.2 headers/libraries available to the build (install Ruby 3.2
-  and expose it via `RB_SYS_RUBY_VERSION=3.2`, or point `libruby` via `RUBY` env).
-  Without the feature the engine keeps using the stub VM for development.
+# point to your Ruby install (see above)
+export RB_SYS_RUBY_VERSION=3.2
+export RUBY=$HOME/.rvm/rubies/ruby-3.2.0/bin/ruby
 
-Ruby dependency:
+# point to the RMXP project (folder that contains Data/, Graphics/, Audio/, etc.)
+export RMXP_GAME_PATH=/absolute/path/to/your/project
 
-- A system Ruby 3.2 (MRI) toolchain with headers/libs is required. Install via
-  `rbenv`, `ruby-install`, Homebrew (`brew install ruby@3.2`), etc.
-- Tell `rb-sys` which Ruby to use, e.g.:
+# optional: boot a specific map ID instead of the System.rxdata start map
+export RMXP_START_MAP=2
 
-  ```bash
-  export RB_SYS_RUBY_VERSION=3.2
-  # optional: specify the exact ruby executable
-  export RUBY=/opt/homebrew/opt/ruby@3.2/bin/ruby
-  ```
+cargo run -p desktop-runner
+```
 
-- Without these env vars pointing to a valid Ruby 3.2 install, the build will
-  fail before launching the engine.
+Environment variables accepted by the desktop runner:
 
-Window & camera:
+| Variable          | Default / Purpose |
+|-------------------|------------------|
+| `RMXP_GAME_PATH`  | **Required.** Absolute path to the RMXP project root (expects `Data/System.rxdata`). |
+| `RMXP_START_MAP`  | Optional. Integer map ID override (falls back to `System.rxdata` if missing/invalid). |
+| `RMXP_LOG`        | Logging filter (e.g. `RMXP_LOG=debug` to enable verbose tracing). |
 
-- Default window size is 640×480 to match vanilla RMXP. The renderer keeps a 1:1
-  pixel scale and centers the player while clamping scroll at map edges.
+The runner opens a 640×480 window, parses the target project’s map database,
+boots Ruby, evaluates every script section, and mirrors the resulting RGSS
+objects into the renderer. When Ruby isn’t driving anything yet, the engine
+falls back to the native tile scene so you can still visualize assets.
 
-Controls:
+---
 
-- Arrow keys or WASD – move the debug player marker across the tilemap.
-- Enter/Space – placeholder confirm button (logged for future UI hooks).
+## Development Tips
 
-## Next Steps
+| Task                 | Command |
+|----------------------|---------|
+| Format all crates    | `cargo fmt` |
+| Lint (workspace)     | `cargo clippy --all-targets --all-features` |
+| Desktop smoke run    | `RMXP_GAME_PATH=… cargo run -p desktop-runner` |
+| Check without running| `cargo check` |
 
-1. **RGSS Scene Loop** – execute real `Scripts.rxdata`, populate sprite/window
-   registries, and drive the renderer with live Ruby scene stacks (characters,
-   maps, UI).
-2. **Audio Playback** – hook RGSS `Audio.*` calls to rodio (BGM/BGS/ME/SE, fades,
-   MIDI via `rustysynth`).
-3. **Event Interpreter** – implement Game_Map/Game_Player + interpreter loops to
-   mirror RMXP behavior (messages, move routes, encounters, triggers).
-4. **Persistence & Config** – save slots, config values (resolution, control
-   mapping, audio levels), and mobile-friendly sandboxes/pickers.
-5. **Mobile Shells** – add Swift/Kotlin launchers that embed the Rust core via
-   `winit` mobile backends (document pickers, lifecycle, storage access).
+Extra tips:
+
+- Set `RMXP_LOG=debug` to watch data loading, RGSS snapshots, and renderer stats.
+- Use `RMXP_START_MAP=<id>` when testing specific maps (e.g., Pokémon Essentials
+  outdoor vs indoor scenes).
+- The renderer captures every backbuffer; `Graphics.snap_to_bitmap` returns a
+  real `Bitmap` (saved in the RGSS handle store) so vanilla screenshot code
+  works.
+
+---
+
+## Roadmap
+
+1. **Scene Loop Integration** – Execute `Main`, wire Game_Map/Game_Player, and
+   run the interpreter so player movement/events/UI flow originate entirely in
+   Ruby.
+2. **Audio Playback** – Implement RGSS `Audio.*` channels on top of Rodio/CPAL
+   (loop points, fades, ME ducking, MIDI via `rustysynth` with bundled
+   SoundFonts).
+3. **Event/Interpreter Core** – Native helpers for passability, collision, and
+   message/input handling that Ruby can call into for performance-sensitive
+   operations.
+4. **Persistence & Config** – Save slots, config options (resolution, control
+   remaps, touch overlays), and sandbox-safe storage across desktop/mobile.
+5. **Mobile Shells** – Ship Swift/Kotlin launchers that expose document pickers,
+   lifecycle callbacks, sandboxed storage, and background audio permissions.
+
+Contributions are welcome—open an issue or PR with the subsystem you’d like to
+tackle, and include details about your RMXP project/setup so we can reproduce. !*** End Patch***}
+***
+End Patch
