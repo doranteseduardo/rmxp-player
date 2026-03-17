@@ -13,19 +13,20 @@
   embedding layer.
 - Added `rmxp-data` crate with a Marshal reader/JSON bridge plus engine wiring
   that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
-- Engine now parses the start map and feeds a color-coded tileview into the
-  renderer so we can visualize real `.rxdata` content end-to-end.
-- Renderer now loads both the B–E tileset sheet and referenced autotiles, then
-  composites every map layer (A + B–E) obeying the tileset's RGSS priority table
-  so upper-layer decorations draw above the ground layer.
+- Engine now parses the start map and feeds a rendered tile scene (tileset +
+  autotiles) into pixels so we can visualize `.rxdata` content end-to-end.
+- Renderer handles autotile sampling/animation, multi-layer composition, and
+  RGSS priority tables so ground/overlay layers display correctly.
+- Desktop runner hosts a fixed 60 Hz update loop with keyboard input (arrows or
+  WASD) driving a placeholder player marker for movement debugging.
 
 ## 🚧 Immediate Goals
 
-1. **Input & Loop** – encode fixed-timestep scheduling, keyboard/gamepad/touch
-   mapping, and state machines for player movement.
-2. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fading, looping,
+1. **Audio Playback** – wrap rodio handles for BGM/BGS/ME/SE with fading, looping,
    and MIDI via `rustysynth`.
-3. **RGSS Integration** – embed Ruby MRI, expose RGSS classes, and drive the
+2. **RGSS Integration** – embed Ruby MRI, expose RGSS classes, and drive the
    scene stack via scripts.
+3. **Event/Interpreter Core** – implement Game_Map/Game_Player logic hooked to
+   passability, event triggers, and future script calls.
 4. **Mobile Shells** – add Swift/Kotlin launchers that delegate to the shared
    Rust engine.

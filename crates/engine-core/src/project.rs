@@ -180,10 +180,6 @@ impl GameProject {
                 return Ok(candidate);
             }
         }
-        anyhow::bail!(
-            "graphic {} not found under {}",
-            name,
-            base.display()
-        );
+        anyhow::bail!("graphic {} not found under {}", name, base.display());
     }
 }

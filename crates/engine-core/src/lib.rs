@@ -1,12 +1,18 @@
 use anyhow::{Context, Result};
 use audio::AudioSystem;
+use game::GameState;
 use image::RgbaImage;
+use input::InputState;
 use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
 use rgss_bindings::RubyVm;
 use rmxp_data::{MapData, SystemData};
-use std::{env, sync::Arc};
+use std::{
+    env,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{info, warn};
 use winit::{
     dpi::LogicalSize,
@@ -16,6 +22,8 @@ use winit::{
 };
 use winit_input_helper::WinitInputHelper;
 
+mod game;
+mod input;
 mod project;
 
 #[derive(Debug, Clone, Default)]
@@ -34,6 +42,8 @@ impl AppConfig {
         }
     }
 }
+
+const FIXED_TIMESTEP: Duration = Duration::from_nanos(16_666_667);
 
 struct FinalizedConfig {
     window_width: u32,
@@ -62,7 +72,7 @@ pub fn run(config: AppConfig) -> Result<()> {
         }
     };
 
-    let (_database, tile_scene) = if let Some(project_ref) = project.as_ref() {
+    let (_database, initial_scene) = if let Some(project_ref) = project.as_ref() {
         match project_ref.load_database() {
             Ok(db) => {
                 db.log_summary();
@@ -77,6 +87,13 @@ pub fn run(config: AppConfig) -> Result<()> {
     } else {
         (None, None)
     };
+
+    let (tile_scene, player_start) = match initial_scene {
+        Some((scene, spawn)) => (Some(scene), spawn),
+        None => (None, (0.0, 0.0)),
+    };
+
+    let mut game = GameState::new(tile_scene, player_start);
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -98,11 +115,15 @@ pub fn run(config: AppConfig) -> Result<()> {
     ruby_vm.boot()?;
 
     let mut input = WinitInputHelper::new();
+    let mut input_state = InputState::default();
+    let mut accumulator = Duration::ZERO;
+    let mut last_tick = Instant::now();
     let mut frame_index: u64 = 0;
 
     event_loop.run(move |event, target| {
         let window_ref = unsafe { &*window_ptr };
         if input.update(&event) {
+            input_state.update_from_helper(&input);
             if input.close_requested() || input.destroyed() {
                 target.exit();
                 return;
@@ -118,7 +139,7 @@ pub fn run(config: AppConfig) -> Result<()> {
                     }
                     WindowEvent::CloseRequested => target.exit(),
                     WindowEvent::RedrawRequested => {
-                        if let Err(err) = renderer.render(frame_index, tile_scene.as_ref()) {
+                        if let Err(err) = renderer.render(frame_index, game.render_frame()) {
                             warn!(target: "render", error = %err, "render error, exiting");
                             target.exit();
                             return;
@@ -129,6 +150,13 @@ pub fn run(config: AppConfig) -> Result<()> {
                 }
             }
             Event::AboutToWait => {
+                let now = Instant::now();
+                accumulator += now - last_tick;
+                last_tick = now;
+                while accumulator >= FIXED_TIMESTEP {
+                    game.update(FIXED_TIMESTEP, &input_state);
+                    accumulator -= FIXED_TIMESTEP;
+                }
                 window_ref.request_redraw();
             }
             _ => {}
@@ -144,7 +172,10 @@ pub fn run(config: AppConfig) -> Result<()> {
 
 const START_MAP_ENV: &str = "RMXP_START_MAP";
 
-fn build_initial_tile_scene(project: &GameProject, db: &GameDatabase) -> Option<TileScene> {
+fn build_initial_tile_scene(
+    project: &GameProject,
+    db: &GameDatabase,
+) -> Option<(TileScene, (f32, f32))> {
     let system = db.system.as_ref()?;
     let map_id = resolve_start_map_id(system);
     match project.load_map(map_id) {
@@ -171,16 +202,16 @@ fn build_initial_tile_scene(project: &GameProject, db: &GameDatabase) -> Option<
             );
             let tileset = match project.load_tileset_image(&tileset_entry.tileset_name) {
                 Ok(image) => Arc::new(image),
-                    Err(err) => {
-                        warn!(
-                            target: "project",
-                            error = ?err,
-                            tileset = %tileset_entry.tileset_name,
-                            "Failed to load tileset for map {}",
-                            map_id
-                        );
-                        return None;
-                    }
+                Err(err) => {
+                    warn!(
+                        target: "project",
+                        error = ?err,
+                        tileset = %tileset_entry.tileset_name,
+                        "Failed to load tileset for map {}",
+                        map_id
+                    );
+                    return None;
+                }
             };
             let autotiles = load_autotile_textures(project, &tileset_entry.autotile_names);
             let priorities = tileset_entry
@@ -195,6 +226,7 @@ fn build_initial_tile_scene(project: &GameProject, db: &GameDatabase) -> Option<
                 })
                 .unwrap_or_default();
             map_to_tile_scene(&map, tileset, autotiles, priorities)
+                .map(|scene| (scene, (system.start_x as f32, system.start_y as f32)))
         }
         Err(err) => {
             warn!(

@@ -14,6 +14,8 @@ engine, rendering, audio, platform utilities, RGSS bindings, and future mobile s
 - ✅ `rmxp-data` crate with a Marshal (Ruby 4.8) parser + JSON helpers.
 - ✅ System/MapInfos parsing + color-coded debug map rendering sourced from the
   project's start map (when `RMXP_GAME_PATH` is set).
+- ✅ Tilesets/autotiles load with RGSS priorities + animation support; on-screen
+  player marker moves with the fixed 60 Hz loop to validate input/pathing.
 - 🚧 Pending: real RGSS embedding, map renderer, input mapping, event system,
   audio playback, save/load, and mobile launchers.
 
@@ -44,6 +46,11 @@ Environment variables:
 - `RMXP_GAME_PATH` – absolute path to the RMXP project folder (expects `Data/System.rxdata`).
 - `RMXP_START_MAP` – optional override for the map ID to boot (defaults to `System.rxdata` start map).
 - `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
+
+Controls:
+
+- Arrow keys or WASD – move the debug player marker across the tilemap.
+- Enter/Space – placeholder confirm button (logged for future UI hooks).
 
 ## Next Steps
 

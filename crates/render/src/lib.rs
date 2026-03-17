@@ -12,12 +12,24 @@ pub struct Renderer<'a> {
     logical_size: (u32, u32),
 }
 
+pub struct RenderFrame<'a> {
+    pub scene: &'a TileScene,
+    pub player_marker: Option<PlayerMarker>,
+}
+
+#[derive(Clone, Copy)]
+pub struct PlayerMarker {
+    pub tile_pos: (f32, f32),
+    pub color: [u8; 4],
+}
+
 #[derive(Clone)]
 pub struct AutotileTexture {
     pub image: Arc<RgbaImage>,
     pub small: bool,
     frame_width: u32,
     frame_height: u32,
+    frames: u32,
 }
 
 impl AutotileTexture {
@@ -31,7 +43,16 @@ impl AutotileTexture {
             small,
             frame_width: base_width.min(width.max(1)),
             frame_height: base_height.min(height.max(1)),
+            frames: (width / base_width).max(1),
         }
+    }
+
+    fn current_frame(&self, frame_index: u64) -> u32 {
+        if self.frames <= 1 {
+            return 0;
+        }
+        const FRAME_INTERVAL: u64 = 8;
+        ((frame_index / FRAME_INTERVAL) % self.frames as u64) as u32
     }
 }
 
@@ -76,10 +97,16 @@ impl<'a> Renderer<'a> {
             .resize_buffer(self.logical_size.0, self.logical_size.1);
     }
 
-    pub fn render(&mut self, frame_index: u64, scene: Option<&TileScene>) -> Result<()> {
+    pub fn render(&mut self, frame_index: u64, frame_data: Option<RenderFrame<'_>>) -> Result<()> {
         let frame = self.pixels.frame_mut();
-        match scene {
-            Some(scene) => draw_tile_scene(scene, self.logical_size, frame),
+        match frame_data {
+            Some(data) => draw_tile_scene(
+                data.scene,
+                data.player_marker.as_ref(),
+                self.logical_size,
+                frame,
+                frame_index,
+            ),
             None => draw_gradient(self.logical_size, frame, frame_index),
         }
         self.pixels.render()?;
@@ -107,7 +134,13 @@ fn debug_pixel(x: usize, y: usize, width: usize) -> [u8; 4] {
     [xx, yy, 0x80, 0xFF]
 }
 
-fn draw_tile_scene(scene: &TileScene, size: (u32, u32), frame: &mut [u8]) {
+fn draw_tile_scene(
+    scene: &TileScene,
+    player_marker: Option<&PlayerMarker>,
+    size: (u32, u32),
+    frame: &mut [u8],
+    frame_index: u64,
+) {
     let width = size.0 as usize;
     let height = size.1 as usize;
     let map_width_px = scene.map_width * scene.tile_size;
@@ -135,7 +168,7 @@ fn draw_tile_scene(scene: &TileScene, size: (u32, u32), frame: &mut [u8]) {
                 if tile_id < 48 {
                     continue;
                 }
-                let sample = sample_tile_pixel(scene, tile_id, local_x, local_y);
+                let sample = sample_tile_pixel(scene, tile_id, local_x, local_y, frame_index);
                 if sample[3] == 0 {
                     continue;
                 }
@@ -157,14 +190,23 @@ fn draw_tile_scene(scene: &TileScene, size: (u32, u32), frame: &mut [u8]) {
             frame[offset..offset + 4].copy_from_slice(&final_color);
         }
     }
+    if let Some(marker) = player_marker {
+        draw_player_marker(scene, marker, size, frame);
+    }
 }
 
-fn sample_tile_pixel(scene: &TileScene, tile_id: i16, local_x: usize, local_y: usize) -> [u8; 4] {
+fn sample_tile_pixel(
+    scene: &TileScene,
+    tile_id: i16,
+    local_x: usize,
+    local_y: usize,
+    frame_index: u64,
+) -> [u8; 4] {
     if tile_id < 48 {
         return [0, 0, 0, 0];
     }
     if tile_id < 384 {
-        return sample_autotile_pixel(scene, tile_id as usize, local_x, local_y);
+        return sample_autotile_pixel(scene, tile_id as usize, local_x, local_y, frame_index);
     }
     let tile_index = (tile_id - 384) as usize;
     let tile_size = scene.tile_size;
@@ -196,14 +238,51 @@ fn blend_pixel(dst: &mut [u8; 4], src: [u8; 4]) {
     for i in 0..3 {
         let src_c = src[i] as f32 / 255.0;
         let dst_c = dst[i] as f32 / 255.0;
-        let out_c =
-            (src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a;
+        let out_c = (src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a;
         dst[i] = (out_c * 255.0).clamp(0.0, 255.0) as u8;
     }
     dst[3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
 }
 
-fn sample_autotile_pixel(scene: &TileScene, tile_id: usize, local_x: usize, local_y: usize) -> [u8; 4] {
+fn draw_player_marker(
+    scene: &TileScene,
+    marker: &PlayerMarker,
+    size: (u32, u32),
+    frame: &mut [u8],
+) {
+    let tile_px = scene.tile_size as f32;
+    let map_width_px = (scene.map_width as f32 * tile_px).max(1.0);
+    let map_height_px = (scene.map_height as f32 * tile_px).max(1.0);
+    let px_x = marker.tile_pos.0 * tile_px;
+    let px_y = marker.tile_pos.1 * tile_px;
+    let screen_x = ((px_x / map_width_px) * size.0 as f32).clamp(0.0, size.0 as f32 - 1.0) as usize;
+    let screen_y =
+        ((px_y / map_height_px) * size.1 as f32).clamp(0.0, size.1 as f32 - 1.0) as usize;
+    let marker_width = std::cmp::max(scene.map_width, 1) as u32;
+    let marker_size = (size.0 / marker_width).max(4).min(24) as usize;
+    let width = size.0 as usize;
+    let y_start = screen_y.saturating_sub(marker_size / 2);
+    let y_end = (screen_y + marker_size / 2).min(std::cmp::max(size.1 as usize, 1) - 1);
+    let x_start = screen_x.saturating_sub(marker_size / 2);
+    let x_end = (screen_x + marker_size / 2).min(width.saturating_sub(1));
+    for y in y_start..=y_end {
+        for x in x_start..=x_end {
+            let offset = (y * width + x) * 4;
+            let dst = &mut frame[offset..offset + 4];
+            let mut color = [dst[0], dst[1], dst[2], dst[3]];
+            blend_pixel(&mut color, marker.color);
+            dst.copy_from_slice(&color);
+        }
+    }
+}
+
+fn sample_autotile_pixel(
+    scene: &TileScene,
+    tile_id: usize,
+    local_x: usize,
+    local_y: usize,
+    frame_index: u64,
+) -> [u8; 4] {
     let at_index = tile_id / 48 - 1;
     if at_index >= scene.autotiles.len() {
         return FALLBACK_PIXEL;
@@ -212,32 +291,38 @@ fn sample_autotile_pixel(scene: &TileScene, tile_id: usize, local_x: usize, loca
         return FALLBACK_PIXEL;
     };
     if texture.small {
-        return sample_small_autotile(texture, local_x, local_y);
+        return sample_small_autotile(texture, local_x, local_y, frame_index);
     }
     let pattern = tile_id % 48;
     if pattern >= AUTOTILE_RECTS.len() {
         return FALLBACK_PIXEL;
     }
+    let frame = texture.current_frame(frame_index);
+    let frame_offset = frame as usize * texture.frame_width as usize;
     let quad = (local_y / 16) * 2 + (local_x / 16);
     let quad = quad.min(3);
     let (rect_x, rect_y) = AUTOTILE_RECTS[pattern][quad];
-    let sample_x = rect_x as usize + (local_x % 16);
+    let sample_x = frame_offset + rect_x as usize + (local_x % 16);
     let sample_y = rect_y as usize + (local_y % 16);
-    if sample_x >= texture.frame_width as usize || sample_y >= texture.frame_height as usize {
+    if sample_x >= texture.image.width() as usize || sample_y >= texture.image.height() as usize {
         return FALLBACK_PIXEL;
     }
-    texture
-        .image
-        .get_pixel(sample_x as u32, sample_y as u32)
-        .0
+    texture.image.get_pixel(sample_x as u32, sample_y as u32).0
 }
 
-fn sample_small_autotile(texture: &AutotileTexture, local_x: usize, local_y: usize) -> [u8; 4] {
+fn sample_small_autotile(
+    texture: &AutotileTexture,
+    local_x: usize,
+    local_y: usize,
+    frame_index: u64,
+) -> [u8; 4] {
     let (width, height) = texture.image.dimensions();
     if width == 0 || height == 0 {
         return FALLBACK_PIXEL;
     }
-    let x = (local_x % texture.frame_width as usize).min(width as usize - 1);
+    let frame = texture.current_frame(frame_index);
+    let frame_offset = frame as usize * texture.frame_width as usize;
+    let x = (frame_offset + (local_x % texture.frame_width as usize)).min(width as usize - 1);
     let y = (local_y % texture.frame_height as usize).min(height as usize - 1);
     texture.image.get_pixel(x as u32, y as u32).0
 }
