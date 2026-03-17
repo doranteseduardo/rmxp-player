@@ -63,6 +63,60 @@ pub fn snapshot() -> Vec<(u32, ViewportData)> {
     VIEWPORTS.snapshot()
 }
 
+pub fn create(rect: RectData) -> u32 {
+    let mut data = ViewportData::default();
+    data.rect = rect;
+    VIEWPORTS.insert(data)
+}
+
+pub fn dispose(id: u32) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.disposed = true;
+    });
+}
+
+pub fn set_rect(id: u32, rect: RectData) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.rect = rect;
+    });
+}
+
+pub fn set_visible(id: u32, visible: bool) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.visible = visible;
+    });
+}
+
+pub fn set_z(id: u32, z: i32) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.z = z;
+    });
+}
+
+pub fn set_ox(id: u32, ox: i32) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.ox = ox;
+    });
+}
+
+pub fn set_oy(id: u32, oy: i32) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.oy = oy;
+    });
+}
+
+pub fn set_color(id: u32, color: ColorData) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.color = color;
+    });
+}
+
+pub fn set_tone(id: u32, tone: ToneData) {
+    VIEWPORTS.with_mut(id, |vp| {
+        vp.tone = tone;
+    });
+}
+
 unsafe fn define_viewport_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(CREATE_NAME), Some(viewport_create), 4);
@@ -93,9 +147,7 @@ unsafe extern "C" fn viewport_create(argc: c_int, argv: *const VALUE, _self: VAL
         value_to_i32(args[2]),
         value_to_i32(args[3]),
     );
-    let mut data = ViewportData::default();
-    data.rect = rect;
-    let id = VIEWPORTS.insert(data);
+    let id = create(rect);
     rb_sys::rb_uint2inum(id as usize)
 }
 
@@ -104,9 +156,7 @@ unsafe extern "C" fn viewport_dispose(argc: c_int, argv: *const VALUE, _self: VA
         return rb_sys::Qnil as VALUE;
     }
     let id = value_to_i32(*argv) as u32;
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.disposed = true;
-    });
+    dispose(id);
     rb_sys::Qnil as VALUE
 }
 
@@ -122,9 +172,7 @@ unsafe extern "C" fn viewport_set_rect(argc: c_int, argv: *const VALUE, _self: V
         value_to_i32(args[3]),
         value_to_i32(args[4]),
     );
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.rect = rect;
-    });
+    set_rect(id, rect);
     rb_sys::Qnil as VALUE
 }
 
@@ -135,9 +183,7 @@ unsafe extern "C" fn viewport_set_visible(argc: c_int, argv: *const VALUE, _self
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let value = value_to_bool(args[1]);
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.visible = value;
-    });
+    set_visible(id, value);
     rb_sys::Qnil as VALUE
 }
 
@@ -148,9 +194,7 @@ unsafe extern "C" fn viewport_set_z(argc: c_int, argv: *const VALUE, _self: VALU
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let value = value_to_i32(args[1]);
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.z = value;
-    });
+    set_z(id, value);
     rb_sys::Qnil as VALUE
 }
 
@@ -161,9 +205,7 @@ unsafe extern "C" fn viewport_set_ox(argc: c_int, argv: *const VALUE, _self: VAL
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let value = value_to_i32(args[1]);
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.ox = value;
-    });
+    set_ox(id, value);
     rb_sys::Qnil as VALUE
 }
 
@@ -174,9 +216,7 @@ unsafe extern "C" fn viewport_set_oy(argc: c_int, argv: *const VALUE, _self: VAL
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let value = value_to_i32(args[1]);
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.oy = value;
-    });
+    set_oy(id, value);
     rb_sys::Qnil as VALUE
 }
 
@@ -192,9 +232,7 @@ unsafe extern "C" fn viewport_set_color(argc: c_int, argv: *const VALUE, _self: 
         value_to_f32(args[3]),
         value_to_f32(args[4]),
     );
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.color = color;
-    });
+    set_color(id, color);
     rb_sys::Qnil as VALUE
 }
 
@@ -210,9 +248,7 @@ unsafe extern "C" fn viewport_set_tone(argc: c_int, argv: *const VALUE, _self: V
         value_to_f32(args[4]),
     );
     let id = value_to_i32(args[0]) as u32;
-    VIEWPORTS.with_mut(id, |vp| {
-        vp.tone = tone;
-    });
+    set_tone(id, tone);
     rb_sys::Qnil as VALUE
 }
 

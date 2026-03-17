@@ -1,4 +1,4 @@
-use super::{module, native_module, value_to_bool, HandleStore};
+use super::{module, native_module, value_to_bool, ColorData, HandleStore, RectData};
 use anyhow::{Context, Result};
 use font8x8::legacy::BASIC_LEGACY;
 use image::{imageops::FilterType, ImageReader, Rgba, RgbaImage};
@@ -89,6 +89,223 @@ pub fn create_from_texture(texture: Arc<RgbaImage>) -> u32 {
     store_bitmap_data(BitmapData::with_texture(texture))
 }
 
+pub fn create_blank(width: u32, height: u32) -> u32 {
+    store_bitmap(width, height)
+}
+
+pub fn load_relative(path: &str) -> Result<u32> {
+    load_bitmap_from_project(path)
+}
+
+pub fn dispose(id: u32) {
+    BITMAPS.with_mut(id, |entry| {
+        entry.disposed = true;
+    });
+}
+
+pub fn is_disposed(id: u32) -> bool {
+    BITMAPS.with(id, |entry| entry.disposed).unwrap_or(true)
+}
+
+pub fn dimensions(id: u32) -> Option<(u32, u32)> {
+    BITMAPS
+        .with(id, |entry| {
+            if entry.disposed {
+                None
+            } else {
+                Some((entry.width, entry.height))
+            }
+        })
+        .flatten()
+}
+
+pub fn clear(id: u32) {
+    let _ = with_bitmap_mut(id, |image| {
+        for pixel in image.pixels_mut() {
+            *pixel = Rgba([0, 0, 0, 0]);
+        }
+    });
+}
+
+pub fn fill_rect(id: u32, rect: RectData, color: ColorData) {
+    let color = color_to_rgba(color);
+    let _ = with_bitmap_mut(id, |image| {
+        fill_rect_raw(image, rect.x, rect.y, rect.width, rect.height, color);
+    });
+}
+
+pub fn gradient_fill_rect(
+    id: u32,
+    rect: RectData,
+    start: ColorData,
+    end: ColorData,
+    vertical: bool,
+) {
+    let start = color_to_rgba(start);
+    let end = color_to_rgba(end);
+    let _ = with_bitmap_mut(id, |image| {
+        gradient_fill_raw(
+            image,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            start,
+            end,
+            vertical,
+        );
+    });
+}
+
+pub fn blt(dest_id: u32, dx: i32, dy: i32, src_id: u32, src_rect: RectData, opacity: u8) {
+    if let Some(source) = bitmap_texture(src_id) {
+        let _ = with_bitmap_mut(dest_id, |dest_image| {
+            blit_images(
+                dest_image,
+                dx,
+                dy,
+                &source,
+                src_rect.x,
+                src_rect.y,
+                src_rect.width,
+                src_rect.height,
+                opacity,
+            );
+        });
+    }
+}
+
+pub fn stretch_blt(
+    dest_id: u32,
+    dest_rect: RectData,
+    src_id: u32,
+    src_rect: RectData,
+    opacity: u8,
+) {
+    if dest_rect.width <= 0 || dest_rect.height <= 0 || src_rect.width <= 0 || src_rect.height <= 0
+    {
+        return;
+    }
+    if let Some(source) = bitmap_texture(src_id) {
+        if let Some(region) = extract_region(
+            &source,
+            src_rect.x,
+            src_rect.y,
+            src_rect.width,
+            src_rect.height,
+        ) {
+            let scaled = image::imageops::resize(
+                &region,
+                dest_rect.width as u32,
+                dest_rect.height as u32,
+                FilterType::Triangle,
+            );
+            let scaled_arc = Arc::new(scaled);
+            let _ = with_bitmap_mut(dest_id, |dest_image| {
+                blit_images(
+                    dest_image,
+                    dest_rect.x,
+                    dest_rect.y,
+                    &scaled_arc,
+                    0,
+                    0,
+                    dest_rect.width,
+                    dest_rect.height,
+                    opacity,
+                );
+            });
+        }
+    }
+}
+
+pub fn draw_text(
+    id: u32,
+    rect: RectData,
+    text: &str,
+    align: i32,
+    font_size: i32,
+    color: ColorData,
+) {
+    let font_size = font_size.max(6);
+    let color = color_to_rgba(color);
+    let _ = with_bitmap_mut(id, |image| {
+        draw_text_run(
+            image,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            text,
+            align,
+            font_size,
+            color,
+        );
+    });
+}
+
+pub fn text_size(font_size: i32, text: &str) -> (i32, i32) {
+    measure_text(text, font_size.max(6))
+}
+
+pub fn set_pixel(id: u32, x: i32, y: i32, color: ColorData) {
+    let rgba = color_to_rgba(color);
+    let _ = with_bitmap_mut(id, |image| {
+        if x >= 0 && y >= 0 {
+            let (width, height) = (image.width(), image.height());
+            if (x as u32) < width && (y as u32) < height {
+                let mut pixel = image.get_pixel_mut(x as u32, y as u32).0;
+                blend_rgba(&mut pixel, rgba.0);
+                *image.get_pixel_mut(x as u32, y as u32) = Rgba(pixel);
+            }
+        }
+    });
+}
+
+pub fn get_pixel(id: u32, x: i32, y: i32) -> Option<ColorData> {
+    BITMAPS
+        .with(id, |entry| {
+            if entry.disposed {
+                return None;
+            }
+            if x < 0 || y < 0 {
+                return None;
+            }
+            let (width, height) = bitmap_bounds(entry);
+            if x as u32 >= width || y as u32 >= height {
+                return None;
+            }
+            let pixel = entry.texture.get_pixel(x as u32, y as u32);
+            Some(color_from_rgba(pixel.0))
+        })
+        .flatten()
+}
+
+pub fn copy_bitmap(src_id: u32) -> Option<u32> {
+    BITMAPS
+        .with(src_id, |entry| {
+            if entry.disposed {
+                None
+            } else {
+                Some(store_bitmap_data(BitmapData::with_texture(
+                    entry.texture.clone(),
+                )))
+            }
+        })
+        .flatten()
+}
+
+fn bitmap_texture(id: u32) -> Option<Arc<RgbaImage>> {
+    BITMAPS
+        .with(id, |entry| {
+            if entry.disposed {
+                None
+            } else {
+                Some(entry.texture.clone())
+            }
+        })
+        .flatten()
+}
+
 unsafe fn define_bitmap_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(BITMAP_CREATE_NAME), Some(bitmap_create), 2);
@@ -161,7 +378,7 @@ unsafe extern "C" fn bitmap_create(argc: c_int, argv: *const VALUE, _self: VALUE
     } else {
         width
     };
-    let id = store_bitmap(width, height);
+    let id = create_blank(width, height);
     rb_uint2inum(id as usize)
 }
 
@@ -175,7 +392,7 @@ unsafe extern "C" fn bitmap_load(argc: c_int, argv: *const VALUE, _self: VALUE) 
         return rb_sys::Qnil as VALUE;
     }
     let path = CStr::from_ptr(path_ptr).to_string_lossy().to_string();
-    match load_bitmap_from_project(&path) {
+    match load_relative(&path) {
         Ok(id) => rb_uint2inum(id as usize),
         Err(err) => {
             warn!(target: "rgss", path = %path, error = %err, "Failed to load bitmap");
@@ -189,9 +406,7 @@ unsafe extern "C" fn bitmap_dispose(argc: c_int, argv: *const VALUE, _self: VALU
         return rb_sys::Qnil as VALUE;
     }
     let id = rb_num2uint(*argv) as u32;
-    BITMAPS.with_mut(id, |entry| {
-        entry.disposed = true;
-    });
+    dispose(id);
     rb_sys::Qnil as VALUE
 }
 
@@ -200,7 +415,7 @@ unsafe extern "C" fn bitmap_width(argc: c_int, argv: *const VALUE, _self: VALUE)
         return rb_sys::Qnil as VALUE;
     }
     let id = rb_num2uint(*argv) as u32;
-    let width = with_bitmap(id, |entry| entry.width).unwrap_or(0);
+    let width = dimensions(id).map(|(w, _)| w).unwrap_or(0);
     int_to_value(width as i64)
 }
 
@@ -209,7 +424,7 @@ unsafe extern "C" fn bitmap_height(argc: c_int, argv: *const VALUE, _self: VALUE
         return rb_sys::Qnil as VALUE;
     }
     let id = rb_num2uint(*argv) as u32;
-    let height = with_bitmap(id, |entry| entry.height).unwrap_or(0);
+    let height = dimensions(id).map(|(_, h)| h).unwrap_or(0);
     int_to_value(height as i64)
 }
 
@@ -218,7 +433,7 @@ unsafe extern "C" fn bitmap_disposed_q(argc: c_int, argv: *const VALUE, _self: V
         return rb_sys::Qfalse as VALUE;
     }
     let id = rb_num2uint(*argv) as u32;
-    let disposed = with_bitmap(id, |entry| entry.disposed).unwrap_or(true);
+    let disposed = is_disposed(id);
     if disposed {
         rb_sys::Qtrue as VALUE
     } else {
@@ -228,13 +443,6 @@ unsafe extern "C" fn bitmap_disposed_q(argc: c_int, argv: *const VALUE, _self: V
 
 fn store_bitmap(width: u32, height: u32) -> u32 {
     store_bitmap_data(BitmapData::blank(width, height))
-}
-
-fn with_bitmap<F, R>(id: u32, func: F) -> Option<R>
-where
-    F: FnOnce(&BitmapData) -> R,
-{
-    BITMAPS.with(id, func)
 }
 
 fn clamp_dimension(value: i32) -> u32 {
@@ -332,15 +540,24 @@ unsafe extern "C" fn bitmap_fill_rect(argc: c_int, argv: *const VALUE, _self: VA
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
     let id = rb_num2uint(args[0]) as u32;
-    let x = rb_num2int(args[1]) as i32;
-    let y = rb_num2int(args[2]) as i32;
-    let width = rb_num2int(args[3]).max(0) as i32;
-    let height = rb_num2int(args[4]).max(0) as i32;
-    let color = rb_num2uint(args[5]) as u32;
-    let color = unpack_color(color);
-    let _ = with_bitmap_mut(id, |image| {
-        fill_rect_raw(image, x, y, width, height, color);
-    });
+    let rect = RectData::new(
+        rb_num2int(args[1]) as i32,
+        rb_num2int(args[2]) as i32,
+        rb_num2int(args[3]).max(0) as i32,
+        rb_num2int(args[4]).max(0) as i32,
+    );
+    let packed = rb_num2uint(args[5]) as u32;
+    let color = unpack_color(packed);
+    fill_rect(
+        id,
+        rect,
+        ColorData::new(
+            color.0[0] as f32,
+            color.0[1] as f32,
+            color.0[2] as f32,
+            color.0[3] as f32,
+        ),
+    );
     rb_sys::Qnil as VALUE
 }
 
@@ -354,16 +571,32 @@ unsafe extern "C" fn bitmap_gradient_fill_rect(
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
     let id = rb_num2uint(args[0]) as u32;
-    let x = rb_num2int(args[1]) as i32;
-    let y = rb_num2int(args[2]) as i32;
-    let width = rb_num2int(args[3]).max(0) as i32;
-    let height = rb_num2int(args[4]).max(0) as i32;
+    let rect = RectData::new(
+        rb_num2int(args[1]) as i32,
+        rb_num2int(args[2]) as i32,
+        rb_num2int(args[3]).max(0) as i32,
+        rb_num2int(args[4]).max(0) as i32,
+    );
     let color1 = unpack_color(rb_num2uint(args[5]) as u32);
     let color2 = unpack_color(rb_num2uint(args[6]) as u32);
     let vertical = value_to_bool(args[7]);
-    let _ = with_bitmap_mut(id, |image| {
-        gradient_fill_raw(image, x, y, width, height, color1, color2, vertical);
-    });
+    gradient_fill_rect(
+        id,
+        rect,
+        ColorData::new(
+            color1.0[0] as f32,
+            color1.0[1] as f32,
+            color1.0[2] as f32,
+            color1.0[3] as f32,
+        ),
+        ColorData::new(
+            color2.0[0] as f32,
+            color2.0[1] as f32,
+            color2.0[2] as f32,
+            color2.0[3] as f32,
+        ),
+        vertical,
+    );
     rb_sys::Qnil as VALUE
 }
 
@@ -372,11 +605,7 @@ unsafe extern "C" fn bitmap_clear(argc: c_int, argv: *const VALUE, _self: VALUE)
         return rb_sys::Qnil as VALUE;
     }
     let id = rb_num2uint(*argv) as u32;
-    let _ = with_bitmap_mut(id, |image| {
-        for pixel in image.pixels_mut() {
-            *pixel = Rgba([0, 0, 0, 0]);
-        }
-    });
+    clear(id);
     rb_sys::Qnil as VALUE
 }
 
@@ -388,24 +617,14 @@ unsafe extern "C" fn bitmap_get_pixel(argc: c_int, argv: *const VALUE, _self: VA
     let id = rb_num2uint(args[0]) as u32;
     let x = rb_num2int(args[1]) as i32;
     let y = rb_num2int(args[2]) as i32;
-    let value = BITMAPS
-        .with(id, |entry| {
-            if entry.disposed {
-                return None;
-            }
-            if x < 0 || y < 0 {
-                return None;
-            }
-            let (width, height) = bitmap_bounds(entry);
-            if x as u32 >= width || y as u32 >= height {
-                return None;
-            }
-            let pixel = entry.texture.get_pixel(x as u32, y as u32);
-            Some(pack_color(pixel.0))
-        })
-        .flatten();
-    if let Some(color) = value {
-        rb_uint2inum(color as usize)
+    if let Some(color) = get_pixel(id, x, y) {
+        let packed = pack_color([
+            color.red as u8,
+            color.green as u8,
+            color.blue as u8,
+            color.alpha as u8,
+        ]);
+        rb_uint2inum(packed as usize)
     } else {
         rb_sys::Qnil as VALUE
     }
@@ -417,8 +636,8 @@ unsafe extern "C" fn bitmap_set_pixel(argc: c_int, argv: *const VALUE, _self: VA
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
     let id = rb_num2uint(args[0]) as u32;
-    let x = rb_num2int(args[1]);
-    let y = rb_num2int(args[2]);
+    let x = rb_num2int(args[1]) as i32;
+    let y = rb_num2int(args[2]) as i32;
     let r = rb_num2int(args[3]) as i32;
     let g = rb_num2int(args[4]) as i32;
     let b = rb_num2int(args[5]) as i32;
@@ -427,21 +646,17 @@ unsafe extern "C" fn bitmap_set_pixel(argc: c_int, argv: *const VALUE, _self: VA
     } else {
         255
     };
-    let color = [
-        r.clamp(0, 255) as u8,
-        g.clamp(0, 255) as u8,
-        b.clamp(0, 255) as u8,
-        a.clamp(0, 255) as u8,
-    ];
-    let _ = with_bitmap_mut(id, |image| {
-        if x >= 0 && y >= 0 {
-            let (width, height) = (image.width(), image.height());
-            if (x as u32) < width && (y as u32) < height {
-                let pixel = image.get_pixel_mut(x as u32, y as u32);
-                *pixel = Rgba(color);
-            }
-        }
-    });
+    set_pixel(
+        id,
+        x,
+        y,
+        ColorData::new(
+            r.clamp(0, 255) as f32,
+            g.clamp(0, 255) as f32,
+            b.clamp(0, 255) as f32,
+            a.clamp(0, 255) as f32,
+        ),
+    );
     rb_sys::Qnil as VALUE
 }
 
@@ -464,21 +679,8 @@ unsafe extern "C" fn bitmap_blt(argc: c_int, argv: *const VALUE, _self: VALUE) -
         255
     };
 
-    let source = BITMAPS
-        .with(src_id, |entry| {
-            if entry.disposed {
-                None
-            } else {
-                Some(entry.texture.clone())
-            }
-        })
-        .flatten();
-    let Some(source_image) = source else {
-        return rb_sys::Qnil as VALUE;
-    };
-    let _ = with_bitmap_mut(dest_id, |dest_image| {
-        blit_images(dest_image, dx, dy, &source_image, sx, sy, sw, sh, opacity);
-    });
+    let rect = RectData::new(sx, sy, sw, sh);
+    blt(dest_id, dx, dy, src_id, rect, opacity);
     rb_sys::Qnil as VALUE
 }
 
@@ -505,25 +707,9 @@ unsafe extern "C" fn bitmap_stretch_blt(argc: c_int, argv: *const VALUE, _self: 
     if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
         return rb_sys::Qnil as VALUE;
     }
-    let source = BITMAPS
-        .with(src_id, |entry| {
-            if entry.disposed {
-                None
-            } else {
-                Some(entry.texture.clone())
-            }
-        })
-        .flatten();
-    let Some(source_image) = source else {
-        return rb_sys::Qnil as VALUE;
-    };
-    if let Some(region) = extract_region(&source_image, sx, sy, sw, sh) {
-        let scaled = image::imageops::resize(&region, dw as u32, dh as u32, FilterType::Triangle);
-        let scaled_arc = Arc::new(scaled);
-        let _ = with_bitmap_mut(dest_id, |dest_image| {
-            blit_images(dest_image, dx, dy, &scaled_arc, 0, 0, dw, dh, opacity);
-        });
-    }
+    let dest_rect = RectData::new(dx, dy, dw, dh);
+    let src_rect = RectData::new(sx, sy, sw, sh);
+    stretch_blt(dest_id, dest_rect, src_id, src_rect, opacity);
     rb_sys::Qnil as VALUE
 }
 
@@ -549,9 +735,19 @@ unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, _self: VA
     let font_size = rb_num2int(args[7]) as i32;
     let font_size = font_size.max(6);
     let color = unpack_color(rb_num2uint(args[8]) as u32);
-    let _ = with_bitmap_mut(id, |image| {
-        draw_text_run(image, x, y, width, height, &text, align, font_size, color);
-    });
+    draw_text(
+        id,
+        RectData::new(x, y, width, height),
+        &text,
+        align,
+        font_size,
+        ColorData::new(
+            color.0[0] as f32,
+            color.0[1] as f32,
+            color.0[2] as f32,
+            color.0[3] as f32,
+        ),
+    );
     rb_sys::Qnil as VALUE
 }
 
@@ -567,7 +763,7 @@ unsafe extern "C" fn bitmap_text_size(argc: c_int, argv: *const VALUE, _self: VA
         return rb_sys::Qnil as VALUE;
     }
     let text = CStr::from_ptr(text_ptr).to_string_lossy().to_string();
-    let (width, height) = measure_text(&text, font_size);
+    let (width, height) = text_size(font_size, &text);
     let array = rb_sys::rb_ary_new();
     rb_sys::rb_ary_push(array, int_to_value(width as i64));
     rb_sys::rb_ary_push(array, int_to_value(height as i64));
@@ -729,6 +925,25 @@ fn unpack_color(value: u32) -> Rgba<u8> {
     let b = ((value >> 16) & 0xFF) as u8;
     let a = ((value >> 24) & 0xFF) as u8;
     Rgba([r, g, b, a])
+}
+
+fn color_to_rgba(color: ColorData) -> Rgba<u8> {
+    let clamp = |v: f32| v.round().clamp(0.0, 255.0) as u8;
+    Rgba([
+        clamp(color.red),
+        clamp(color.green),
+        clamp(color.blue),
+        clamp(color.alpha),
+    ])
+}
+
+fn color_from_rgba(pixel: [u8; 4]) -> ColorData {
+    ColorData::new(
+        pixel[0] as f32,
+        pixel[1] as f32,
+        pixel[2] as f32,
+        pixel[3] as f32,
+    )
 }
 
 fn extract_region(

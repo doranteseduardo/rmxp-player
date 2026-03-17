@@ -99,6 +99,132 @@ pub fn snapshot() -> Vec<(u32, SpriteData)> {
     SPRITES.snapshot()
 }
 
+pub fn create(viewport: Option<u32>) -> u32 {
+    let mut data = SpriteData::default();
+    data.viewport_id = viewport;
+    SPRITES.insert(data)
+}
+
+pub fn dispose(id: u32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.disposed = true;
+    });
+}
+
+pub fn set_viewport(id: u32, viewport: Option<u32>) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.viewport_id = viewport;
+    });
+}
+
+pub fn set_bitmap(id: u32, bitmap: Option<u32>) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.bitmap_id = bitmap;
+    });
+}
+
+pub fn set_x(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.x = value;
+    });
+}
+
+pub fn set_y(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.y = value;
+    });
+}
+
+pub fn set_z(id: u32, value: i32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.z = value;
+    });
+}
+
+pub fn set_ox(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.ox = value;
+    });
+}
+
+pub fn set_oy(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.oy = value;
+    });
+}
+
+pub fn set_zoom_x(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.zoom_x = value;
+    });
+}
+
+pub fn set_zoom_y(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.zoom_y = value;
+    });
+}
+
+pub fn set_angle(id: u32, value: f32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.angle = value;
+    });
+}
+
+pub fn set_mirror(id: u32, value: bool) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.mirror = value;
+    });
+}
+
+pub fn set_bush_depth(id: u32, value: i32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.bush_depth = value;
+    });
+}
+
+pub fn set_bush_opacity(id: u32, value: i32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.bush_opacity = value;
+    });
+}
+
+pub fn set_opacity(id: u32, value: i32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.opacity = value;
+    });
+}
+
+pub fn set_blend_type(id: u32, value: i32) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.blend_type = value;
+    });
+}
+
+pub fn set_visible(id: u32, value: bool) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.visible = value;
+    });
+}
+
+pub fn set_src_rect(id: u32, rect: RectData) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.src_rect = rect;
+    });
+}
+
+pub fn set_color(id: u32, color: ColorData) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.color = color;
+    });
+}
+
+pub fn set_tone(id: u32, tone: ToneData) {
+    SPRITES.with_mut(id, |sprite| {
+        sprite.tone = tone;
+    });
+}
+
 unsafe fn define_sprite_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(CREATE_NAME), Some(sprite_create), 1);
@@ -165,9 +291,7 @@ unsafe extern "C" fn sprite_create(argc: c_int, argv: *const VALUE, _self: VALUE
         return rb_sys::Qnil as VALUE;
     }
     let viewport_id = value_to_handle(*argv);
-    let mut data = SpriteData::default();
-    data.viewport_id = viewport_id;
-    let id = SPRITES.insert(data);
+    let id = create(viewport_id);
     rb_sys::rb_uint2inum(id as usize)
 }
 
@@ -176,14 +300,12 @@ unsafe extern "C" fn sprite_dispose(argc: c_int, argv: *const VALUE, _self: VALU
         return rb_sys::Qnil as VALUE;
     }
     let id = value_to_i32(*argv) as u32;
-    SPRITES.with_mut(id, |sprite| {
-        sprite.disposed = true;
-    });
+    dispose(id);
     rb_sys::Qnil as VALUE
 }
 
 macro_rules! sprite_setter {
-    ($name:ident, $field:ident, $convert:expr) => {
+    ($name:ident, $setter:ident, $convert:expr) => {
         unsafe extern "C" fn $name(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
             if argc != 2 || argv.is_null() {
                 return rb_sys::Qnil as VALUE;
@@ -191,28 +313,30 @@ macro_rules! sprite_setter {
             let args = std::slice::from_raw_parts(argv, 2);
             let id = value_to_i32(args[0]) as u32;
             let value = $convert(args[1]);
-            SPRITES.with_mut(id, |sprite| {
-                sprite.$field = value;
-            });
+            $setter(id, value);
             rb_sys::Qnil as VALUE
         }
     };
 }
 
-sprite_setter!(sprite_set_x, x, |val| value_to_f32(val));
-sprite_setter!(sprite_set_y, y, |val| value_to_f32(val));
-sprite_setter!(sprite_set_z, z, |val| value_to_i32(val));
-sprite_setter!(sprite_set_ox, ox, |val| value_to_f32(val));
-sprite_setter!(sprite_set_oy, oy, |val| value_to_f32(val));
-sprite_setter!(sprite_set_zoom_x, zoom_x, |val| value_to_f32(val));
-sprite_setter!(sprite_set_zoom_y, zoom_y, |val| value_to_f32(val));
-sprite_setter!(sprite_set_angle, angle, |val| value_to_f32(val));
-sprite_setter!(sprite_set_bush_depth, bush_depth, |val| value_to_i32(val));
-sprite_setter!(sprite_set_opacity, opacity, |val| value_to_i32(val));
-sprite_setter!(sprite_set_blend_type, blend_type, |val| value_to_i32(val));
-sprite_setter!(sprite_set_bush_opacity, bush_opacity, |val| value_to_i32(
+sprite_setter!(sprite_set_x, set_x, |val| value_to_f32(val));
+sprite_setter!(sprite_set_y, set_y, |val| value_to_f32(val));
+sprite_setter!(sprite_set_z, set_z, |val| value_to_i32(val));
+sprite_setter!(sprite_set_ox, set_ox, |val| value_to_f32(val));
+sprite_setter!(sprite_set_oy, set_oy, |val| value_to_f32(val));
+sprite_setter!(sprite_set_zoom_x, set_zoom_x, |val| value_to_f32(val));
+sprite_setter!(sprite_set_zoom_y, set_zoom_y, |val| value_to_f32(val));
+sprite_setter!(sprite_set_angle, set_angle, |val| value_to_f32(val));
+sprite_setter!(sprite_set_bush_depth, set_bush_depth, |val| value_to_i32(
     val
 ));
+sprite_setter!(sprite_set_opacity, set_opacity, |val| value_to_i32(val));
+sprite_setter!(sprite_set_blend_type, set_blend_type, |val| value_to_i32(
+    val
+));
+sprite_setter!(sprite_set_bush_opacity, set_bush_opacity, |val| {
+    value_to_i32(val)
+});
 
 unsafe extern "C" fn sprite_set_viewport(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     if argc != 2 || argv.is_null() {
@@ -221,9 +345,7 @@ unsafe extern "C" fn sprite_set_viewport(argc: c_int, argv: *const VALUE, _self:
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let viewport = value_to_handle(args[1]);
-    SPRITES.with_mut(id, |sprite| {
-        sprite.viewport_id = viewport;
-    });
+    set_viewport(id, viewport);
     rb_sys::Qnil as VALUE
 }
 
@@ -234,9 +356,7 @@ unsafe extern "C" fn sprite_set_bitmap(argc: c_int, argv: *const VALUE, _self: V
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let bitmap = value_to_handle(args[1]);
-    SPRITES.with_mut(id, |sprite| {
-        sprite.bitmap_id = bitmap;
-    });
+    set_bitmap(id, bitmap);
     rb_sys::Qnil as VALUE
 }
 
@@ -247,9 +367,7 @@ unsafe extern "C" fn sprite_set_mirror(argc: c_int, argv: *const VALUE, _self: V
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let mirror = value_to_bool(args[1]);
-    SPRITES.with_mut(id, |sprite| {
-        sprite.mirror = mirror;
-    });
+    set_mirror(id, mirror);
     rb_sys::Qnil as VALUE
 }
 
@@ -260,9 +378,7 @@ unsafe extern "C" fn sprite_set_visible(argc: c_int, argv: *const VALUE, _self: 
     let args = std::slice::from_raw_parts(argv, 2);
     let id = value_to_i32(args[0]) as u32;
     let visible = value_to_bool(args[1]);
-    SPRITES.with_mut(id, |sprite| {
-        sprite.visible = visible;
-    });
+    set_visible(id, visible);
     rb_sys::Qnil as VALUE
 }
 
@@ -278,9 +394,7 @@ unsafe extern "C" fn sprite_set_src_rect(argc: c_int, argv: *const VALUE, _self:
         value_to_i32(args[3]),
         value_to_i32(args[4]),
     );
-    SPRITES.with_mut(id, |sprite| {
-        sprite.src_rect = rect;
-    });
+    set_src_rect(id, rect);
     rb_sys::Qnil as VALUE
 }
 
@@ -296,9 +410,7 @@ unsafe extern "C" fn sprite_set_color(argc: c_int, argv: *const VALUE, _self: VA
         value_to_f32(args[3]),
         value_to_f32(args[4]),
     );
-    SPRITES.with_mut(id, |sprite| {
-        sprite.color = color;
-    });
+    set_color(id, color);
     rb_sys::Qnil as VALUE
 }
 
@@ -314,9 +426,7 @@ unsafe extern "C" fn sprite_set_tone(argc: c_int, argv: *const VALUE, _self: VAL
         value_to_f32(args[3]),
         value_to_f32(args[4]),
     );
-    SPRITES.with_mut(id, |sprite| {
-        sprite.tone = tone;
-    });
+    set_tone(id, tone);
     rb_sys::Qnil as VALUE
 }
 

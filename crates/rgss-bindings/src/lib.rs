@@ -1,5 +1,6 @@
 //! Embedded Ruby (MRI) host for RGSS scripts.
 
+mod classes;
 mod graphics;
 mod input;
 mod kernel;
@@ -104,6 +105,7 @@ impl RubyVm {
             kernel::init()?;
             input::init()?;
             native::init()?;
+            classes::init()?;
             system::init()?;
             self.booted = true;
             scripts::load(self)?;

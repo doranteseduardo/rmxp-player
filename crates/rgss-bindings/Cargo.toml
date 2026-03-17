@@ -7,6 +7,9 @@ edition = "2021"
 anyhow = { workspace = true }
 tracing = { workspace = true }
 once_cell = { workspace = true }
-rb-sys = { version = "0.9.124", default-features = false, features = ["link-ruby"] }
+rb-sys = { version = "0.9.124", default-features = false, features = ["link-ruby", "stable-api"] }
 image = { workspace = true }
 font8x8 = "0.3"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(ruby_have_rb_data_type_t_function)'] }

@@ -1,0 +1,2 @@
+[env]
+RUBY_USE_INTERNAL_HEADERS = "1"
