@@ -9,8 +9,8 @@
 - Audio subsystem initializes the default rodio output stream (no playback yet).
 - Platform helper configures config/save directories and installs `tracing`
   logging with `RMXP_LOG` filtering.
-- RGSS bindings crate contains a stub `RubyVm` placeholder for the future MRI
-  embedding layer.
+- RGSS bindings crate boots an embedded Ruby 3.2 VM via `rb-sys`; building now
+  requires a Ruby toolchain (`RB_SYS_RUBY_VERSION=3.2`, `RUBY=/path/to/ruby`).
 - Added `rmxp-data` crate with a Marshal reader/JSON bridge plus engine wiring
   that reads `Data/System.rxdata`/`MapInfos.rxdata` from `RMXP_GAME_PATH`.
 - Engine now parses the start map and feeds a rendered tile scene (tileset +

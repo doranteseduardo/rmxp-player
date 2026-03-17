@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 tracing = { workspace = true }
+once_cell = { workspace = true }
+rb-sys = { version = "0.9.124", default-features = false, features = ["link-ruby"] }

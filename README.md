@@ -47,6 +47,29 @@ Environment variables:
 - `RMXP_START_MAP` – optional override for the map ID to boot (defaults to `System.rxdata` start map).
 - `RMXP_LOG=debug` – increases log verbosity (uses `tracing-subscriber`).
 
+Ruby (MRI) embedding:
+
+- Enable the optional `rgss-bindings/mri` feature to boot a real Ruby 3.2 VM:
+  `cargo run -p desktop-runner --features rgss-bindings/mri`.
+- You need Ruby 3.2 headers/libraries available to the build (install Ruby 3.2
+  and expose it via `RB_SYS_RUBY_VERSION=3.2`, or point `libruby` via `RUBY` env).
+  Without the feature the engine keeps using the stub VM for development.
+
+Ruby dependency:
+
+- A system Ruby 3.2 (MRI) toolchain with headers/libs is required. Install via
+  `rbenv`, `ruby-install`, Homebrew (`brew install ruby@3.2`), etc.
+- Tell `rb-sys` which Ruby to use, e.g.:
+
+  ```bash
+  export RB_SYS_RUBY_VERSION=3.2
+  # optional: specify the exact ruby executable
+  export RUBY=/opt/homebrew/opt/ruby@3.2/bin/ruby
+  ```
+
+- Without these env vars pointing to a valid Ruby 3.2 install, the build will
+  fail before launching the engine.
+
 Window & camera:
 
 - Default window size is 640×480 to match vanilla RMXP. The renderer keeps a 1:1
