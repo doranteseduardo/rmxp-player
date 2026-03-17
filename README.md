@@ -41,6 +41,10 @@ and mobile targets.
   Ruby fallbacks for visual effects. Screen-level `Graphics.blur`/`sharpen`
   now run through the renderer’s CPU post-process pipeline (or directly on the
   frozen frame), matching mkxp-z transitions.
+- **Flash/Window Parity** – `Tilemap#flash_data` animates with the same 32-step
+  alpha loop and additive blend that mkxp-z uses, and window cursor/content
+  rectangles honor `ox/oy` offsets with full tone/color tinting, so Essentials’
+  UI highlights line up exactly.
 - **Lifecycle Hooks** – Window close/destroy events trigger the RGSS `Hangup`
   exception instead of aborting the process, giving scripts a chance to intercept
   shutdown just like in mkxp-z.

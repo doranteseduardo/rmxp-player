@@ -564,6 +564,14 @@ fn c_name(bytes: &[u8]) -> *const c_char {
     bytes.as_ptr() as *const c_char
 }
 
+fn clamp_tone_channel(value: f32) -> f32 {
+    value.clamp(-255.0, 255.0)
+}
+
+fn clamp_gray_channel(value: f32) -> f32 {
+    value.clamp(0.0, 255.0)
+}
+
 #[derive(Clone, Copy)]
 enum ScreenFilter {
     Blur,
@@ -770,10 +778,10 @@ unsafe extern "C" fn graphics_set_tone(argc: c_int, argv: *const VALUE, _self: V
     }
     let args = std::slice::from_raw_parts(argv, 4);
     let mut tone = ToneState::default();
-    tone.red = rb_num2long(args[0]) as f32;
-    tone.green = rb_num2long(args[1]) as f32;
-    tone.blue = rb_num2long(args[2]) as f32;
-    tone.gray = rb_num2long(args[3]).clamp(0, 255) as f32;
+    tone.red = clamp_tone_channel(rb_num2long(args[0]) as f32);
+    tone.green = clamp_tone_channel(rb_num2long(args[1]) as f32);
+    tone.blue = clamp_tone_channel(rb_num2long(args[2]) as f32);
+    tone.gray = clamp_gray_channel(rb_num2long(args[3]) as f32);
     if let Ok(mut slot) = SCREEN_TONE.write() {
         *slot = tone;
     }

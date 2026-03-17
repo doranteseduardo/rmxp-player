@@ -2,7 +2,7 @@ use crate::input::InputState;
 use image::RgbaImage;
 use render::{
     AutotileTexture, Camera, ClipRect, FallbackScene, PlaneInstance, PlayerMarker, RenderFrame,
-    SpriteInstance, TileScene, TilemapInstance, WindowInstance,
+    SpriteInstance, TileScene, TilemapFlashMap, TilemapInstance, WindowInstance,
 };
 use rgss_bindings::{
     bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, viewport_snapshot,
@@ -408,9 +408,11 @@ impl GameState {
                 .and_then(|id| textures.get(&id).cloned());
             let contents = window.contents_id.and_then(|id| textures.get(&id).cloned());
             let cursor_rect = if window.cursor_rect.width > 0 && window.cursor_rect.height > 0 {
+                let contents_x = frame_rect.x + WINDOW_PADDING - window.ox;
+                let contents_y = frame_rect.y + WINDOW_PADDING - window.oy;
                 Some(ClipRect::new(
-                    frame_rect.x + WINDOW_PADDING + window.cursor_rect.x,
-                    frame_rect.y + WINDOW_PADDING + window.cursor_rect.y,
+                    contents_x + window.cursor_rect.x,
+                    contents_y + window.cursor_rect.y,
                     window.cursor_rect.width.max(0) as u32,
                     window.cursor_rect.height.max(0) as u32,
                 ))
@@ -495,6 +497,17 @@ impl GameState {
                 .map(|value| (*value).clamp(0, 6) as u8)
                 .collect()
         };
+        let flash_map = tilemap.flash.as_ref().and_then(|flash| {
+            if flash.width == 0 || flash.height == 0 || flash.values.is_empty() {
+                None
+            } else {
+                Some(TilemapFlashMap {
+                    width: flash.width,
+                    height: flash.height,
+                    values: flash.values.clone(),
+                })
+            }
+        });
         Some(TileScene {
             map_width: grid.width,
             map_height: grid.height,
@@ -503,6 +516,8 @@ impl GameState {
             autotiles,
             layers: grid.layers.clone(),
             priorities,
+            flash_map,
+            flash_phase: tilemap.flash_phase,
         })
     }
 

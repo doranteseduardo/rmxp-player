@@ -44,6 +44,7 @@ pub struct TilemapData {
     pub map: Option<TilemapGrid>,
     pub priorities: Vec<i16>,
     pub flash: Option<TilemapFlash>,
+    pub flash_phase: u8,
     pub ox: i32,
     pub oy: i32,
     pub visible: bool,
@@ -77,6 +78,7 @@ impl Default for TilemapData {
             map: None,
             priorities: Vec::new(),
             flash: None,
+            flash_phase: 0,
             ox: 0,
             oy: 0,
             visible: true,
@@ -188,7 +190,12 @@ pub fn set_tone(id: u32, tone: ToneData) {
 }
 
 pub fn update(id: u32) {
-    TILEMAPS.with_mut(id, |_tilemap| {});
+    const FLASH_PHASE_STEPS: u8 = 32;
+    TILEMAPS.with_mut(id, |tilemap| {
+        if FLASH_PHASE_STEPS > 0 {
+            tilemap.flash_phase = (tilemap.flash_phase + 1) % FLASH_PHASE_STEPS;
+        }
+    });
 }
 
 fn set_map_data_internal(id: u32, width: usize, height: usize, layers: usize, values: &[i16]) {

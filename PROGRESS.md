@@ -58,6 +58,10 @@
 - `Graphics.blur`/`Graphics.sharpen` hook into the renderer’s screen-effects
   pass (with frozen-frame fallbacks) so transitions that rely on those filters
   match the RPG Maker runtime instead of silently no-oping.
+- Tilemap flash tables now flow from Ruby `flash_data` to the renderer with the
+  mkxp-z pulse curve, opacity clamping, and additive blend, while window cursor
+  rectangles respect `ox/oy` so scrolled contents keep their highlight and tone/
+  color operations mirror the reference implementation.
 
 ## 🚧 Immediate Goals
 

@@ -81,6 +81,11 @@ const WINDOW_CURSOR_SRC: SkinRect = SkinRect {
     h: 32,
 };
 
+const FLASH_ALPHA: [u8; 32] = [
+    0x3C, 0x3C, 0x3C, 0x3C, 0x4B, 0x4B, 0x4B, 0x4B, 0x5A, 0x5A, 0x5A, 0x5A, 0x69, 0x69, 0x69, 0x69,
+    0x78, 0x78, 0x78, 0x78, 0x69, 0x69, 0x69, 0x69, 0x5A, 0x5A, 0x5A, 0x5A, 0x4B, 0x4B, 0x4B, 0x4B,
+];
+
 /// Basic renderer responsible for presenting frames using `pixels`.
 pub struct Renderer<'a> {
     pixels: Pixels<'a>,
@@ -299,6 +304,15 @@ pub struct TileScene {
     pub autotiles: Vec<Option<AutotileTexture>>,
     pub layers: Vec<Vec<i16>>,
     pub priorities: Vec<u8>,
+    pub flash_map: Option<TilemapFlashMap>,
+    pub flash_phase: u8,
+}
+
+#[derive(Clone)]
+pub struct TilemapFlashMap {
+    pub width: usize,
+    pub height: usize,
+    pub values: Vec<i16>,
 }
 
 impl TileScene {
@@ -308,6 +322,30 @@ impl TileScene {
         }
         let index = tile_id as usize;
         self.priorities.get(index).copied().unwrap_or(0)
+    }
+
+    fn flash_color(&self, tile_x: usize, tile_y: usize) -> Option<[u8; 4]> {
+        let flash = self.flash_map.as_ref()?;
+        if flash.width == 0 || flash.height == 0 {
+            return None;
+        }
+        let phase_idx = (self.flash_phase as usize) % FLASH_ALPHA.len();
+        let alpha = FLASH_ALPHA[phase_idx];
+        if alpha == 0 {
+            return None;
+        }
+        let idx_x = tile_x % flash.width;
+        let idx_y = tile_y % flash.height;
+        let index = idx_y * flash.width + idx_x;
+        let packed = *flash.values.get(index)?;
+        if packed == 0 {
+            return None;
+        }
+        let value = packed as u16;
+        let r = ((value >> 8) & 0x0F) as u8 * 17;
+        let g = ((value >> 4) & 0x0F) as u8 * 17;
+        let b = (value & 0x0F) as u8 * 17;
+        Some([r, g, b, alpha])
     }
 }
 
@@ -453,6 +491,9 @@ fn draw_tilemap_region(
     let Some(clip) = clip.clamp(size) else {
         return;
     };
+    if opacity == 0 {
+        return;
+    }
     let width = size.0 as usize;
     let height = size.1 as usize;
     let map_width_px = scene.map_width * scene.tile_size;
@@ -536,9 +577,13 @@ fn draw_tilemap_region(
             if opacity < 255 {
                 final_color[3] = ((final_color[3] as u16 * opacity as u16) / 255) as u8;
             }
+            let flash_overlay = scene.flash_color(tile_x, tile_y);
             let idx = (dest_y as usize * width + dest_x as usize) * 4;
             let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];
             blend_with_mode(&mut dst, final_color, blend_type);
+            if let Some(extra) = flash_overlay {
+                blend_with_mode(&mut dst, extra, 1);
+            }
             frame[idx..idx + 4].copy_from_slice(&dst);
         }
     }
@@ -1108,6 +1153,7 @@ fn draw_window_contents(
             if color[3] == 0 {
                 continue;
             }
+            color = apply_tone_and_color(color, &window.tone, &window.color);
             color[3] = ((color[3] as u16 * base_opacity as u16) / 255) as u8;
             let idx = (dest_y as usize * size.0 as usize + dest_x as usize) * 4;
             let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];

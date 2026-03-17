@@ -466,11 +466,7 @@ unsafe extern "C" fn tilemap_set_priorities(
     }
     match table_snapshot(value) {
         Some(snapshot) => {
-            native::tilemap::set_priorities(
-                tilemap.handle,
-                snapshot.data.len() as i32,
-                &snapshot.data,
-            );
+            apply_priority_snapshot(tilemap.handle, &snapshot.data);
             tilemap.priorities = value;
             value
         }
@@ -608,6 +604,18 @@ fn apply_map_snapshot(handle: u32, snapshot: &TableSnapshot) {
     );
 }
 
+fn apply_priority_snapshot(handle: u32, data: &[i16]) {
+    if data.is_empty() {
+        native::tilemap::clear_priorities(handle);
+        return;
+    }
+    let clamped: Vec<i16> = data
+        .iter()
+        .map(|value| (*value).clamp(0i16, 6i16))
+        .collect();
+    native::tilemap::set_priorities(handle, clamped.len() as i32, &clamped);
+}
+
 fn apply_all(tilemap: &TilemapValue) {
     native::tilemap::set_viewport(tilemap.handle, viewport_handle(tilemap.viewport));
     native::tilemap::set_tileset(tilemap.handle, bitmap_handle(tilemap.tileset));
@@ -621,11 +629,7 @@ fn apply_all(tilemap: &TilemapValue) {
     }
     if tilemap.priorities != rb_sys::Qnil as VALUE {
         if let Some(snapshot) = table_snapshot(tilemap.priorities) {
-            native::tilemap::set_priorities(
-                tilemap.handle,
-                snapshot.data.len() as i32,
-                &snapshot.data,
-            );
+            apply_priority_snapshot(tilemap.handle, &snapshot.data);
         }
     }
     if tilemap.flash_data != rb_sys::Qnil as VALUE {

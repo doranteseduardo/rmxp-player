@@ -567,5 +567,7 @@ fn map_to_tile_scene(
         autotiles,
         layers,
         priorities,
+        flash_map: None,
+        flash_phase: 0,
     })
 }
