@@ -45,6 +45,9 @@ and mobile targets.
   alpha loop and additive blend that mkxp-z uses, and window cursor/content
   rectangles honor `ox/oy` offsets with full tone/color tinting, so Essentials’
   UI highlights line up exactly.
+- **Audio Hooks** – The `Audio.bgm/bgs/me/se` APIs (including fade and
+  memorize/restore behavior) now live in Rust and forward into pluggable hooks,
+  so integrating a real rodio backend no longer requires Ruby shims.
 - **Lifecycle Hooks** – Window close/destroy events trigger the RGSS `Hangup`
   exception instead of aborting the process, giving scripts a chance to intercept
   shutdown just like in mkxp-z.

@@ -2,6 +2,7 @@
 name = "rgss-bindings"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 anyhow = { workspace = true }
@@ -15,6 +16,9 @@ open = "5"
 sysinfo = { version = "0.30", default-features = false }
 walkdir = "2.5"
 arboard = "3.6"
+
+[build-dependencies]
+rb-sys-build = "0.9.124"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(ruby_have_rb_data_type_t_function)'] }

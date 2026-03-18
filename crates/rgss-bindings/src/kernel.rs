@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
-use rb_sys::{rb_mKernel, VALUE};
+use rb_sys::{rb_mKernel, rb_obj_class, VALUE};
 use std::os::raw::{c_char, c_int};
 use tracing::warn;
 
@@ -13,12 +13,14 @@ extern "C" {
         func: Option<RubyFn>,
         argc: c_int,
     );
+    fn rb_define_method(module: VALUE, name: *const c_char, func: Option<RubyFn>, argc: c_int);
     fn rb_block_given_p() -> c_int;
     fn rb_yield(arg: VALUE) -> VALUE;
 }
 
 const RGSS_MAIN_NAME: &[u8] = b"rgss_main\0";
 const RGSS_STOP_NAME: &[u8] = b"rgss_stop\0";
+const CLASS_NAME: &[u8] = b"class\0";
 
 static KERNEL_FUNCTIONS: OnceCell<()> = OnceCell::new();
 
@@ -35,6 +37,7 @@ unsafe fn define_kernel_functions() -> Result<()> {
     }
     rb_define_module_function(kernel, c_name(RGSS_MAIN_NAME), Some(kernel_rgss_main), -1);
     rb_define_module_function(kernel, c_name(RGSS_STOP_NAME), Some(kernel_rgss_stop), 0);
+    rb_define_method(kernel, c_name(CLASS_NAME), Some(kernel_class), -1);
     Ok(())
 }
 
@@ -48,6 +51,10 @@ unsafe extern "C" fn kernel_rgss_main(_argc: c_int, _argv: *const VALUE, _self: 
 
 unsafe extern "C" fn kernel_rgss_stop(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
     rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn kernel_class(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    rb_obj_class(self_value)
 }
 
 fn c_name(bytes: &[u8]) -> *const c_char {

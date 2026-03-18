@@ -1,5 +1,6 @@
 //! Embedded Ruby (MRI) host for RGSS scripts.
 
+mod audio;
 mod classes;
 mod fs;
 mod graphics;
@@ -13,10 +14,12 @@ mod system;
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use rb_sys::{
-    rb_errinfo, rb_eval_string_protect, rb_obj_as_string, rb_require, rb_string_value_cstr,
-    ruby_init_loadpath, ruby_init_stack, ruby_setup, ruby_sysinit, VALUE,
+    rb_errinfo, rb_eval_string_protect, rb_gv_set, rb_intern, rb_obj_as_string, rb_require,
+    rb_string_value_cstr, rb_utf8_str_new, ruby_init_loadpath, ruby_init_stack, ruby_setup,
+    ruby_sysinit, VALUE,
 };
 use std::{
+    env,
     ffi::{CStr, CString},
     os::raw::{c_char, c_int},
     path::Path,
@@ -25,6 +28,14 @@ use std::{
 use tracing::{debug, info, warn};
 
 static RUBY_INIT: OnceCell<()> = OnceCell::new();
+const CURRENT_SCRIPT_GVAR: &[u8] = b"$RGSS_CURRENT_SCRIPT\0";
+const FULL_MESSAGE_METHOD: &[u8] = b"full_message\0";
+
+type ID = usize;
+
+extern "C" {
+    fn rb_funcall(recv: VALUE, mid: ID, argc: c_int, ...) -> VALUE;
+}
 
 pub use input::{
     update_input, InputSnapshot, TextEvent, BUTTON_A, BUTTON_ALT, BUTTON_B, BUTTON_C, BUTTON_CTRL,
@@ -58,6 +69,7 @@ pub fn sync_graphics_size(width: u32, height: u32) {
     graphics::set_screen_size(width, height);
 }
 
+pub use audio::{install_audio_hooks, AudioHooks, BgmCommand, BgsCommand, MeCommand, SeCommand};
 pub use graphics::{request_hangup, screen_effects, store_backbuffer, ScreenEffects};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -110,6 +122,7 @@ impl RubyVm {
             input::init()?;
             native::init()?;
             classes::init()?;
+            audio::init()?;
             system::init()?;
             self.booted = true;
             scripts::load(self)?;
@@ -182,6 +195,7 @@ fn ensure_ruby() -> Result<()> {
 }
 
 unsafe fn start_ruby() -> Result<()> {
+    configure_ruby_load_path();
     let mut argc: c_int = 0;
     let mut argv: [*mut c_char; 0] = [];
     let mut argv_ptr = argv.as_mut_ptr();
@@ -200,6 +214,53 @@ unsafe fn start_ruby() -> Result<()> {
     Ok(())
 }
 
+fn configure_ruby_load_path() {
+    let mut paths = Vec::new();
+    add_cfg_path(option_env!("RGSS_RUBY_CFG_rubylibdir"), &mut paths);
+    add_cfg_path(option_env!("RGSS_RUBY_CFG_archdir"), &mut paths);
+    add_cfg_path(option_env!("RGSS_RUBY_CFG_sitearchdir"), &mut paths);
+    add_cfg_path(option_env!("RGSS_RUBY_CFG_sitelibdir"), &mut paths);
+    add_cfg_path(option_env!("RGSS_RUBY_CFG_vendorlibdir"), &mut paths);
+    add_cfg_path(option_env!("RGSS_RUBY_CFG_vendorarchdir"), &mut paths);
+
+    if let Some(existing) = env::var_os("RUBYLIB") {
+        for path in env::split_paths(&existing) {
+            if !paths.iter().any(|p| p == &path) {
+                paths.push(path);
+            }
+        }
+    }
+
+    if paths.is_empty() {
+        return;
+    }
+
+    match env::join_paths(&paths) {
+        Ok(joined) => {
+            debug!(target: "rgss", "Configured RUBYLIB with {} entries", paths.len());
+            env::set_var("RUBYLIB", joined);
+        }
+        Err(err) => {
+            warn!(
+                target: "rgss",
+                error = %err,
+                "Failed to configure RUBYLIB"
+            );
+        }
+    }
+}
+
+fn add_cfg_path(value: Option<&'static str>, paths: &mut Vec<std::path::PathBuf>) {
+    if let Some(path) = value {
+        if !path.is_empty() {
+            let buf = std::path::PathBuf::from(path);
+            if buf.exists() && !paths.iter().any(|p| p == &buf) {
+                paths.push(buf);
+            }
+        }
+    }
+}
+
 unsafe fn require_feature(feature: &str) -> Result<()> {
     let feature = CString::new(feature)?;
     rb_require(feature.as_ptr());
@@ -213,9 +274,22 @@ pub(crate) unsafe fn current_exception_message() -> String {
     CStr::from_ptr(ptr).to_string_lossy().into_owned()
 }
 
+pub(crate) unsafe fn current_exception_full_message() -> Option<String> {
+    let err = rb_errinfo();
+    let mid = rb_intern(FULL_MESSAGE_METHOD.as_ptr() as *const c_char) as ID;
+    let value = rb_funcall(err, mid, 0);
+    if value == rb_sys::Qnil as VALUE {
+        return None;
+    }
+    let mut string = value;
+    let ptr = rb_string_value_cstr(&mut string);
+    Some(CStr::from_ptr(ptr).to_string_lossy().into_owned())
+}
+
 fn eval_section(section: &ScriptSection<'_>) -> Result<()> {
     let label = script_label(section);
     debug!(target: "rgss", id = section.id, name = %label, "Evaluating script");
+    let _guard = ScriptLabelGuard::push(&label);
     let script = CString::new(section.source.as_bytes())
         .map_err(|_| anyhow!("script {label} contains interior null byte"))?;
     let mut state: c_int = 0;
@@ -223,6 +297,9 @@ fn eval_section(section: &ScriptSection<'_>) -> Result<()> {
         rb_eval_string_protect(script.as_ptr(), &mut state);
         if state != 0 {
             let message = current_exception_message();
+            if let Some(full) = current_exception_full_message() {
+                warn!(target: "rgss", script = %label, "{}", full);
+            }
             return Err(anyhow!("Ruby error in script {label}: {message}"));
         }
     }
@@ -236,4 +313,36 @@ fn script_label(section: &ScriptSection<'_>) -> String {
     } else {
         name.to_string()
     }
+}
+
+pub(crate) fn push_script_label(label: &str) -> ScriptLabelGuard {
+    ScriptLabelGuard::push(label)
+}
+
+struct ScriptLabelGuard;
+
+impl ScriptLabelGuard {
+    fn push(label: &str) -> Self {
+        unsafe { set_current_script_label(label) };
+        Self
+    }
+}
+
+impl Drop for ScriptLabelGuard {
+    fn drop(&mut self) {
+        unsafe {
+            clear_current_script_label();
+        }
+    }
+}
+
+unsafe fn set_current_script_label(label: &str) {
+    let bytes = label.as_bytes();
+    let len = bytes.len() as i64;
+    let value = rb_utf8_str_new(bytes.as_ptr() as *const c_char, len);
+    rb_gv_set(CURRENT_SCRIPT_GVAR.as_ptr() as *const c_char, value);
+}
+
+unsafe fn clear_current_script_label() {
+    rb_gv_set(CURRENT_SCRIPT_GVAR.as_ptr() as *const c_char, rb_sys::Qnil as VALUE);
 }

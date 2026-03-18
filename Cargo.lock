@@ -1926,6 +1926,7 @@ dependencies = [
  "once_cell",
  "open",
  "rb-sys",
+ "rb-sys-build",
  "sysinfo",
  "tracing",
  "walkdir",

@@ -1,7 +1,7 @@
 use crate::fs;
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
-use rb_sys::{rb_define_module, rb_define_module_under, rb_utf8_str_new, VALUE};
+use rb_sys::{rb_define_module, rb_define_module_under, rb_obj_class, rb_utf8_str_new, VALUE};
 use std::{
     ffi::{CStr, CString},
     os::raw::{c_char, c_int},
@@ -13,6 +13,7 @@ const NATIVE_MODULE_NAME: &[u8] = b"Native\0";
 const PROJECT_PATH_NAME: &[u8] = b"project_path\0";
 const CONFIG_PATH_NAME: &[u8] = b"config_path\0";
 const SAVE_PATH_NAME: &[u8] = b"save_path\0";
+const CLASS_OF_NAME: &[u8] = b"class_of\0";
 
 static RGSS_MODULE: OnceCell<VALUE> = OnceCell::new();
 static NATIVE_MODULE: OnceCell<VALUE> = OnceCell::new();
@@ -111,6 +112,7 @@ unsafe fn define_native_functions(module: VALUE) -> Result<()> {
         0,
     );
     rb_define_module_function(module, c_name(SAVE_PATH_NAME), Some(native_save_path), 0);
+    rb_define_module_function(module, c_name(CLASS_OF_NAME), Some(native_class_of), 1);
     Ok(())
 }
 
@@ -146,6 +148,14 @@ unsafe extern "C" fn native_save_path(_argc: c_int, _argv: *const VALUE, _self: 
         Some(path) => path_to_value(path),
         None => rb_sys::Qnil as VALUE,
     }
+}
+
+unsafe extern "C" fn native_class_of(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    rb_obj_class(args[0])
 }
 
 fn path_to_value(path: &Path) -> VALUE {

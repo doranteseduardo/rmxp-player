@@ -105,6 +105,89 @@ unless String.method_defined?(:message)
   end
 end
 
+module RGSS
+  module Compat
+    INSTANCE_CLASS_METHOD = ::Object.instance_method(:class)
+
+    def self.basic_class(obj)
+      INSTANCE_CLASS_METHOD.bind(obj).call
+    end
+
+    def self.inject_class_method(mod)
+      mod.class_eval do
+        define_method(:class) { RGSS::Compat.basic_class(self) }
+      end
+    end
+
+    def self.inject_singleton_class_method(mod)
+      mod.singleton_class.class_eval do
+        define_method(:class) { RGSS::Compat.basic_class(self) }
+      end
+    end
+
+    def self.report_class_change(target, action)
+      script = ($RGSS_CURRENT_SCRIPT || '(unknown script)').to_s
+      location = caller_locations(2, 10)&.find { |loc| loc.path && !loc.path.include?(__FILE__) }
+      site = location ? "#{location.path}:#{location.lineno}" : '(no Ruby caller)'
+      warn("[RGSS] #{script} #{action} #{target}#class @ #{site}")
+    end
+
+    module ModulePatch
+      def undef_method(*symbols)
+        restore = symbols.any? { |sym| sym.to_sym == :class }
+        super
+        if restore
+          RGSS::Compat.report_class_change(self, :undef_method)
+          RGSS::Compat.inject_class_method(self)
+        end
+      end
+
+      def remove_method(*symbols)
+        restore = symbols.any? { |sym| sym.to_sym == :class }
+        super
+        if restore
+          RGSS::Compat.report_class_change(self, :remove_method)
+          RGSS::Compat.inject_class_method(self)
+        end
+      end
+    end
+
+    module KernelSingletonPatch
+      def undef_method(*symbols)
+        restore = symbols.any? { |sym| sym.to_sym == :class }
+        super
+        if restore
+          RGSS::Compat.report_class_change(self, :undef_singleton_method)
+          RGSS::Compat.inject_singleton_class_method(Kernel)
+        end
+      end
+
+      def remove_method(*symbols)
+        restore = symbols.any? { |sym| sym.to_sym == :class }
+        super
+        if restore
+          RGSS::Compat.report_class_change(self, :remove_singleton_method)
+          RGSS::Compat.inject_singleton_class_method(Kernel)
+        end
+      end
+    end
+  end
+end
+
+RGSS::Compat.inject_class_method(Object)
+RGSS::Compat.inject_singleton_class_method(Kernel)
+
+Module.prepend(RGSS::Compat::ModulePatch)
+Kernel.singleton_class.prepend(RGSS::Compat::KernelSingletonPatch)
+
+unless String.method_defined?(:clone)
+  class String
+    def clone(*)
+      dup
+    end
+  end
+end
+
 module Kernel
   def data_path(relative = '')
     RGSS::Native.project_path(relative.to_s)
@@ -112,12 +195,12 @@ module Kernel
 
   def load_data(filename)
     path = resolve_rgss_read_path(filename)
-    File.open(path, 'rb') { |f| Marshal.load(f) }
+    File.open(path, 'rb') { |f| Marshal.send(:load, f) }
   end
 
   def save_data(object, filename)
     path = resolve_rgss_write_path(filename)
-    File.open(path, 'wb') { |f| Marshal.dump(object, f) }
+    File.open(path, 'wb') { |f| Marshal.send(:dump, object, f) }
     object
   end
 
@@ -194,57 +277,5 @@ module Graphics
       color ||= Color.new(255, 255, 255, 255)
       _flash(color.red, color.green, color.blue, color.alpha, duration.to_i)
     end
-  end
-end
-
-module Audio
-  module_function
-
-  def bgm_play(*_args)
-    RGSS::Debug.warn_once('Audio.bgm_play')
-  end
-
-  def bgm_stop
-    RGSS::Debug.warn_once('Audio.bgm_stop')
-  end
-
-  def bgm_fade(_time)
-    RGSS::Debug.warn_once('Audio.bgm_fade')
-  end
-
-  def bgs_play(*_args)
-    RGSS::Debug.warn_once('Audio.bgs_play')
-  end
-
-  def bgs_stop
-    RGSS::Debug.warn_once('Audio.bgs_stop')
-  end
-
-  def bgs_fade(_time)
-    RGSS::Debug.warn_once('Audio.bgs_fade')
-  end
-
-  def me_play(*_args)
-    RGSS::Debug.warn_once('Audio.me_play')
-  end
-
-  def me_stop
-    RGSS::Debug.warn_once('Audio.me_stop')
-  end
-
-  def me_fade(_time)
-    RGSS::Debug.warn_once('Audio.me_fade')
-  end
-
-  def se_play(*_args)
-    RGSS::Debug.warn_once('Audio.se_play')
-  end
-
-  def se_stop
-    RGSS::Debug.warn_once('Audio.se_stop')
-  end
-
-  def se_fade(_time)
-    RGSS::Debug.warn_once('Audio.se_fade')
   end
 end

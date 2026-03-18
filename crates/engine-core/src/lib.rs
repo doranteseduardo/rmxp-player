@@ -112,31 +112,6 @@ pub fn run(config: AppConfig) -> Result<()> {
         None => (None, (0.0, 0.0)),
     };
 
-    let mut game = GameState::new(
-        tile_scene,
-        player_start,
-        (cfg.window_width, cfg.window_height),
-    );
-
-    let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
-    let window = Box::new(
-        WindowBuilder::new()
-            .with_title(cfg.title.clone())
-            .with_inner_size(LogicalSize::new(
-                cfg.window_width as f64,
-                cfg.window_height as f64,
-            ))
-            .build(&event_loop)?,
-    );
-
-    let window_ptr: *mut winit::window::Window = Box::into_raw(window);
-    register_window_hooks(window_ptr, &cfg.title);
-    let mut renderer = Renderer::new(unsafe { &*window_ptr }, cfg.window_width, cfg.window_height)?;
-    sync_graphics_size(cfg.window_width, cfg.window_height);
-    rgss_bindings::sync_graphics_size(cfg.window_width, cfg.window_height);
-    let _audio = AudioSystem::new()?;
-
     let mut ruby_vm = RubyVm::new();
     ruby_vm.boot()?;
     if let Some(project_ref) = project.as_ref() {
@@ -173,6 +148,36 @@ pub fn run(config: AppConfig) -> Result<()> {
             }
         }
     }
+
+    if env::var("RMXP_SKIP_RENDERER").is_ok() {
+        info!(target: "engine", "RMXP_SKIP_RENDERER set; exiting after script load");
+        return Ok(());
+    }
+
+    let mut game = GameState::new(
+        tile_scene,
+        player_start,
+        (cfg.window_width, cfg.window_height),
+    );
+
+    let event_loop = EventLoop::new()?;
+    event_loop.set_control_flow(ControlFlow::Poll);
+    let window = Box::new(
+        WindowBuilder::new()
+            .with_title(cfg.title.clone())
+            .with_inner_size(LogicalSize::new(
+                cfg.window_width as f64,
+                cfg.window_height as f64,
+            ))
+            .build(&event_loop)?,
+    );
+
+    let window_ptr: *mut winit::window::Window = Box::into_raw(window);
+    register_window_hooks(window_ptr, &cfg.title);
+    let mut renderer = Renderer::new(unsafe { &*window_ptr }, cfg.window_width, cfg.window_height)?;
+    sync_graphics_size(cfg.window_width, cfg.window_height);
+    rgss_bindings::sync_graphics_size(cfg.window_width, cfg.window_height);
+    let _audio = AudioSystem::new()?;
 
     let mut input = WinitInputHelper::new();
     let mut input_state = InputState::default();

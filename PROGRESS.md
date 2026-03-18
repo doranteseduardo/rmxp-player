@@ -8,6 +8,7 @@
   tilemaps via the shared renderer abstraction (Metal on macOS, Vulkan/DX on
   Linux/Windows).
 - Audio subsystem initializes the default rodio output stream (no playback yet).
+- RGSS `Audio.*` API is now implemented natively with memorize/restore semantics and hook points so the engine can drive real playback instead of Ruby stubs.
 - Platform helper configures config/save directories and installs `tracing`
   logging with `RMXP_LOG` filtering.
 - RGSS bindings crate boots an embedded Ruby 3.2 VM via `rb-sys`; building now
