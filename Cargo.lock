@@ -1925,6 +1925,7 @@ dependencies = [
  "image",
  "once_cell",
  "open",
+ "parking_lot",
  "rb-sys",
  "rb-sys-build",
  "sysinfo",

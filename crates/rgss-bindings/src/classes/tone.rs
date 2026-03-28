@@ -1,6 +1,7 @@
 use super::common::{
-    bool_to_value, define_method, float_to_value, get_typed_data, install_allocator,
-    wrap_typed_data, DataTypeBuilder, StaticDataType,
+    bool_to_value, bytes_to_str, define_method, define_singleton_method, float_to_value,
+    get_typed_data, install_allocator, ruby_string_bytes, wrap_typed_data, DataTypeBuilder,
+    StaticDataType,
 };
 use crate::native::{value_to_f32, ToneData};
 use anyhow::Result;
@@ -48,6 +49,10 @@ static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
 static METHOD_TO_A: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
+static METHOD_DUMP: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_dump\0") });
+static METHOD_LOAD: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_load\0") });
 
 #[derive(Clone)]
 struct ToneValue {
@@ -86,6 +91,8 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_EQUAL, tone_equal, -1);
         define_method(klass, *METHOD_DUP, tone_dup, 0);
         define_method(klass, *METHOD_TO_A, tone_to_a, 0);
+        define_method(klass, *METHOD_DUMP, tone_dump, -1);
+        define_singleton_method(klass, *METHOD_LOAD, tone_load, -1);
     }
     Ok(())
 }
@@ -244,6 +251,38 @@ pub fn clone_tone(value: VALUE) -> VALUE {
         *get_tone_mut(new_value) = source;
         new_value
     }
+}
+
+unsafe extern "C" fn tone_dump(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let t = get_tone_mut(self_value);
+    let mut buf = [0u8; 32];
+    buf[0..8].copy_from_slice(&(t.red as f64).to_le_bytes());
+    buf[8..16].copy_from_slice(&(t.green as f64).to_le_bytes());
+    buf[16..24].copy_from_slice(&(t.blue as f64).to_le_bytes());
+    buf[24..32].copy_from_slice(&(t.gray as f64).to_le_bytes());
+    bytes_to_str(&buf)
+}
+
+unsafe extern "C" fn tone_load(argc: c_int, argv: *const VALUE, klass: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let bytes = match ruby_string_bytes(args[0]) {
+        Some(b) if b.len() >= 32 => b,
+        _ => return tone_allocate_internal(klass),
+    };
+    let r = f64::from_le_bytes(bytes[0..8].try_into().unwrap()) as f32;
+    let g = f64::from_le_bytes(bytes[8..16].try_into().unwrap()) as f32;
+    let b = f64::from_le_bytes(bytes[16..24].try_into().unwrap()) as f32;
+    let gray = f64::from_le_bytes(bytes[24..32].try_into().unwrap()) as f32;
+    let obj = tone_allocate_internal(klass);
+    let data = get_tone_mut(obj);
+    data.red = r.clamp(-255.0, 255.0);
+    data.green = g.clamp(-255.0, 255.0);
+    data.blue = b.clamp(-255.0, 255.0);
+    data.gray = gray.clamp(0.0, 255.0);
+    obj
 }
 
 pub fn is_tone(value: VALUE) -> bool {

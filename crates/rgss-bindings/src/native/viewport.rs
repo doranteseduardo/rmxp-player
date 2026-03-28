@@ -119,20 +119,20 @@ pub fn set_tone(id: u32, tone: ToneData) {
 
 unsafe fn define_viewport_api() -> Result<()> {
     let native = native_module()?;
-    rb_define_module_function(native, c_name(CREATE_NAME), Some(viewport_create), 4);
-    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(viewport_dispose), 1);
-    rb_define_module_function(native, c_name(SET_RECT_NAME), Some(viewport_set_rect), 5);
+    rb_define_module_function(native, c_name(CREATE_NAME), Some(viewport_create), -1);
+    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(viewport_dispose), -1);
+    rb_define_module_function(native, c_name(SET_RECT_NAME), Some(viewport_set_rect), -1);
     rb_define_module_function(
         native,
         c_name(SET_VISIBLE_NAME),
         Some(viewport_set_visible),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_Z_NAME), Some(viewport_set_z), 2);
-    rb_define_module_function(native, c_name(SET_OX_NAME), Some(viewport_set_ox), 2);
-    rb_define_module_function(native, c_name(SET_OY_NAME), Some(viewport_set_oy), 2);
-    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(viewport_set_color), 5);
-    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(viewport_set_tone), 5);
+    rb_define_module_function(native, c_name(SET_Z_NAME), Some(viewport_set_z), -1);
+    rb_define_module_function(native, c_name(SET_OX_NAME), Some(viewport_set_ox), -1);
+    rb_define_module_function(native, c_name(SET_OY_NAME), Some(viewport_set_oy), -1);
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(viewport_set_color), -1);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(viewport_set_tone), -1);
     Ok(())
 }
 

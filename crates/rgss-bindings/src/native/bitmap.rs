@@ -341,29 +341,29 @@ pub fn hue_change(id: u32, hue: i32) {
 
 unsafe fn define_bitmap_api() -> Result<()> {
     let native = native_module()?;
-    rb_define_module_function(native, c_name(BITMAP_CREATE_NAME), Some(bitmap_create), 2);
-    rb_define_module_function(native, c_name(BITMAP_DISPOSE_NAME), Some(bitmap_dispose), 1);
-    rb_define_module_function(native, c_name(BITMAP_WIDTH_NAME), Some(bitmap_width), 1);
-    rb_define_module_function(native, c_name(BITMAP_HEIGHT_NAME), Some(bitmap_height), 1);
+    rb_define_module_function(native, c_name(BITMAP_CREATE_NAME), Some(bitmap_create), -1);
+    rb_define_module_function(native, c_name(BITMAP_DISPOSE_NAME), Some(bitmap_dispose), -1);
+    rb_define_module_function(native, c_name(BITMAP_WIDTH_NAME), Some(bitmap_width), -1);
+    rb_define_module_function(native, c_name(BITMAP_HEIGHT_NAME), Some(bitmap_height), -1);
     rb_define_module_function(
         native,
         c_name(BITMAP_DISPOSED_NAME),
         Some(bitmap_disposed_q),
-        1,
+        -1,
     );
-    rb_define_module_function(native, c_name(BITMAP_LOAD_NAME), Some(bitmap_load), 1);
+    rb_define_module_function(native, c_name(BITMAP_LOAD_NAME), Some(bitmap_load), -1);
     rb_define_module_function(
         native,
         c_name(BITMAP_FILL_RECT_NAME),
         Some(bitmap_fill_rect),
-        6,
+        -1,
     );
-    rb_define_module_function(native, c_name(BITMAP_CLEAR_NAME), Some(bitmap_clear), 1);
+    rb_define_module_function(native, c_name(BITMAP_CLEAR_NAME), Some(bitmap_clear), -1);
     rb_define_module_function(
         native,
         c_name(BITMAP_GET_PIXEL_NAME),
         Some(bitmap_get_pixel),
-        3,
+        -1,
     );
     rb_define_module_function(
         native,
@@ -394,13 +394,13 @@ unsafe fn define_bitmap_api() -> Result<()> {
         native,
         c_name(BITMAP_TEXT_SIZE_NAME),
         Some(bitmap_text_size),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(BITMAP_HUE_CHANGE_NAME),
         Some(bitmap_hue_change),
-        2,
+        -1,
     );
     Ok(())
 }

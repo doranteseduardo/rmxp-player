@@ -1,5 +1,6 @@
 pub(crate) mod bitmap;
 mod handles;
+pub(crate) mod interpreter;
 mod module;
 pub(crate) mod plane;
 pub(crate) mod sprite;
@@ -13,6 +14,7 @@ use anyhow::Result;
 
 pub fn init() -> Result<()> {
     module::init()?;
+    interpreter::init()?;
     handles::init();
     bitmap::init()?;
     viewport::init()?;
@@ -25,6 +27,7 @@ pub fn init() -> Result<()> {
 
 pub use bitmap::{create_from_texture, snapshot as bitmap_snapshot, BitmapData};
 pub(crate) use handles::HandleStore;
+pub use interpreter::{drain_commands as drain_interpreter_commands, InterpreterCommand};
 pub use module::{config_dir, save_dir, set_config_dir, set_save_dir};
 pub(crate) use module::{native_module, set_project_root};
 pub use plane::{snapshot as plane_snapshot, PlaneData};

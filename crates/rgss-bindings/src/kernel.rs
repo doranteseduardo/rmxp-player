@@ -1,3 +1,4 @@
+use crate::runtime;
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use rb_sys::{rb_mKernel, rb_obj_class, VALUE};
@@ -15,7 +16,7 @@ extern "C" {
     );
     fn rb_define_method(module: VALUE, name: *const c_char, func: Option<RubyFn>, argc: c_int);
     fn rb_block_given_p() -> c_int;
-    fn rb_yield(arg: VALUE) -> VALUE;
+    fn rb_block_proc() -> VALUE;
 }
 
 const RGSS_MAIN_NAME: &[u8] = b"rgss_main\0";
@@ -46,10 +47,21 @@ unsafe extern "C" fn kernel_rgss_main(_argc: c_int, _argv: *const VALUE, _self: 
         warn!(target: "rgss", "rgss_main called without a block");
         return rb_sys::Qnil as VALUE;
     }
-    rb_yield(rb_sys::Qnil as VALUE)
+    let block = rb_block_proc();
+    if block == 0 {
+        warn!(target: "rgss", "Failed to capture rgss_main block");
+        return rb_sys::Qnil as VALUE;
+    }
+    if let Err(err) = runtime::install_main(block) {
+        warn!(target: "rgss", error = %err, "Failed to install rgss_main block");
+    }
+    rb_sys::Qnil as VALUE
 }
 
 unsafe extern "C" fn kernel_rgss_stop(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    if let Err(err) = runtime::reset_main() {
+        warn!(target: "rgss", error = %err, "Failed to reset RGSS runtime");
+    }
     rb_sys::Qnil as VALUE
 }
 

@@ -23,6 +23,9 @@ extern "C" {
         func: Option<RubyMethod>,
         argc: c_int,
     );
+    pub fn rb_string_value_ptr(v: *mut VALUE) -> *const c_char;
+    pub fn rb_str_length(v: VALUE) -> VALUE;
+    pub fn rb_num2long(v: VALUE) -> c_long;
 }
 
 #[repr(C)]
@@ -214,4 +217,15 @@ pub fn utf8_str(text: &str) -> VALUE {
 
 pub fn to_c_long(len: usize) -> c_long {
     len.try_into().expect("length exceeds c_long range")
+}
+
+/// Get the raw bytes from a Ruby String VALUE (safe for binary data with null bytes).
+pub unsafe fn ruby_string_bytes(val: VALUE) -> Option<Vec<u8>> {
+    let mut v = val;
+    let ptr = rb_string_value_ptr(&mut v);
+    if ptr.is_null() {
+        return None;
+    }
+    let len = rb_num2long(rb_str_length(val)) as usize;
+    Some(std::slice::from_raw_parts(ptr as *const u8, len).to_vec())
 }

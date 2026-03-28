@@ -1,6 +1,7 @@
 use super::common::{
-    bool_to_value, define_method, float_to_value, get_typed_data, install_allocator,
-    wrap_typed_data, DataTypeBuilder, StaticDataType,
+    bool_to_value, bytes_to_str, define_method, define_singleton_method, float_to_value,
+    get_typed_data, install_allocator, ruby_string_bytes, wrap_typed_data, DataTypeBuilder,
+    StaticDataType,
 };
 use crate::native::{value_to_f32, ColorData};
 use anyhow::Result;
@@ -48,6 +49,10 @@ static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
 static METHOD_TO_A: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
+static METHOD_DUMP: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_dump\0") });
+static METHOD_LOAD: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_load\0") });
 
 #[derive(Clone)]
 struct ColorValue {
@@ -86,6 +91,8 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_EQUAL, color_equal, -1);
         define_method(klass, *METHOD_DUP, color_dup, 0);
         define_method(klass, *METHOD_TO_A, color_to_a, 0);
+        define_method(klass, *METHOD_DUMP, color_dump, -1);
+        define_singleton_method(klass, *METHOD_LOAD, color_load, -1);
     }
     Ok(())
 }
@@ -246,6 +253,38 @@ unsafe extern "C" fn color_dup(_argc: c_int, _argv: *const VALUE, self_value: VA
     let target = get_color_mut(new_obj);
     *target = source;
     new_obj
+}
+
+unsafe extern "C" fn color_dump(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let c = get_color_mut(self_value);
+    let mut buf = [0u8; 32];
+    buf[0..8].copy_from_slice(&(c.red as f64).to_le_bytes());
+    buf[8..16].copy_from_slice(&(c.green as f64).to_le_bytes());
+    buf[16..24].copy_from_slice(&(c.blue as f64).to_le_bytes());
+    buf[24..32].copy_from_slice(&(c.alpha as f64).to_le_bytes());
+    bytes_to_str(&buf)
+}
+
+unsafe extern "C" fn color_load(argc: c_int, argv: *const VALUE, klass: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let bytes = match ruby_string_bytes(args[0]) {
+        Some(b) if b.len() >= 32 => b,
+        _ => return color_allocate_internal(klass),
+    };
+    let r = f64::from_le_bytes(bytes[0..8].try_into().unwrap()) as f32;
+    let g = f64::from_le_bytes(bytes[8..16].try_into().unwrap()) as f32;
+    let b = f64::from_le_bytes(bytes[16..24].try_into().unwrap()) as f32;
+    let a = f64::from_le_bytes(bytes[24..32].try_into().unwrap()) as f32;
+    let obj = color_allocate_internal(klass);
+    let data = get_color_mut(obj);
+    data.red = clamp_component(r);
+    data.green = clamp_component(g);
+    data.blue = clamp_component(b);
+    data.alpha = clamp_component(a);
+    obj
 }
 
 pub fn is_color(value: VALUE) -> bool {

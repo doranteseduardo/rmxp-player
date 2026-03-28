@@ -210,6 +210,7 @@ static INPUT_MODULE: OnceCell<()> = OnceCell::new();
 static STORE: Lazy<Mutex<InputStore>> = Lazy::new(|| Mutex::new(InputStore::default()));
 static MOUSE_STATE: Lazy<RwLock<MouseState>> = Lazy::new(|| RwLock::new(MouseState::default()));
 static TEXT_STATE: Lazy<RwLock<TextState>> = Lazy::new(|| RwLock::new(TextState::default()));
+static RAW_KEY_STATES: Lazy<RwLock<[bool; 256]>> = Lazy::new(|| RwLock::new([false; 256]));
 
 pub const BUTTON_DOWN: ButtonMask = 1 << 0;
 pub const BUTTON_LEFT: ButtonMask = 1 << 1;
@@ -250,6 +251,7 @@ pub struct InputSnapshot {
     mouse_in_window: bool,
     scroll_v: f32,
     text_events: Vec<TextEvent>,
+    raw_key_states: Box<[bool; 256]>,
 }
 
 impl Default for InputSnapshot {
@@ -260,6 +262,7 @@ impl Default for InputSnapshot {
             mouse_in_window: false,
             scroll_v: 0.0,
             text_events: Vec::new(),
+            raw_key_states: Box::new([false; 256]),
         }
     }
 }
@@ -298,6 +301,10 @@ impl InputSnapshot {
     pub fn mask(&self) -> ButtonMask {
         self.mask
     }
+
+    pub fn set_raw_key_states(&mut self, states: [bool; 256]) {
+        *self.raw_key_states = states;
+    }
 }
 
 pub fn init() -> Result<()> {
@@ -313,7 +320,11 @@ pub fn update_input(snapshot: InputSnapshot) {
         mouse_in_window,
         scroll_v,
         text_events,
+        raw_key_states,
     } = snapshot;
+    if let Ok(mut states) = RAW_KEY_STATES.write() {
+        *states = *raw_key_states;
+    }
     if let Ok(mut store) = STORE.lock() {
         store.ingest(mask);
     }
@@ -344,12 +355,12 @@ unsafe fn define_input() -> Result<()> {
 
     rb_define_module_function(module, c_name(DELTA_NAME), Some(input_delta), 0);
     rb_define_module_function(module, c_name(UPDATE_NAME), Some(input_update), -1);
-    rb_define_module_function(module, c_name(PRESS_Q_NAME), Some(input_press_qmark), 1);
-    rb_define_module_function(module, c_name(TRIGGER_Q_NAME), Some(input_trigger_qmark), 1);
-    rb_define_module_function(module, c_name(REPEAT_Q_NAME), Some(input_repeat_qmark), 1);
-    rb_define_module_function(module, c_name(RELEASE_Q_NAME), Some(input_release_qmark), 1);
-    rb_define_module_function(module, c_name(COUNT_NAME), Some(input_count), 1);
-    rb_define_module_function(module, c_name(TIME_Q_NAME), Some(input_time_qmark), 1);
+    rb_define_module_function(module, c_name(PRESS_Q_NAME), Some(input_press_qmark), -1);
+    rb_define_module_function(module, c_name(TRIGGER_Q_NAME), Some(input_trigger_qmark), -1);
+    rb_define_module_function(module, c_name(REPEAT_Q_NAME), Some(input_repeat_qmark), -1);
+    rb_define_module_function(module, c_name(RELEASE_Q_NAME), Some(input_release_qmark), -1);
+    rb_define_module_function(module, c_name(COUNT_NAME), Some(input_count), -1);
+    rb_define_module_function(module, c_name(TIME_Q_NAME), Some(input_time_qmark), -1);
     rb_define_module_function(module, c_name(DIR4_NAME), Some(input_dir4), 0);
     rb_define_module_function(module, c_name(DIR8_NAME), Some(input_dir8), 0);
     rb_define_module_function(module, c_name(MOUSE_X_NAME), Some(input_mouse_x), 0);
@@ -378,7 +389,7 @@ unsafe fn define_input() -> Result<()> {
         module,
         c_name(TEXT_INPUT_SET_NAME),
         Some(input_set_text_input),
-        1,
+        -1,
     );
     rb_define_module_function(module, c_name(GETS_NAME), Some(input_gets), 0);
     rb_define_module_function(module, c_name(CLIPBOARD_NAME), Some(input_clipboard), 0);
@@ -386,7 +397,7 @@ unsafe fn define_input() -> Result<()> {
         module,
         c_name(CLIPBOARD_SET_NAME),
         Some(input_set_clipboard),
-        1,
+        -1,
     );
 
     define_controller_module(module);
@@ -458,37 +469,37 @@ unsafe fn define_controller_module(parent: VALUE) {
         controller,
         c_name(CONTROLLER_PRESS_EX_NAME),
         Some(controller_bool_false),
-        1,
+        -1,
     );
     rb_define_module_function(
         controller,
         c_name(CONTROLLER_TRIGGER_EX_NAME),
         Some(controller_bool_false),
-        1,
+        -1,
     );
     rb_define_module_function(
         controller,
         c_name(CONTROLLER_REPEAT_EX_NAME),
         Some(controller_bool_false),
-        1,
+        -1,
     );
     rb_define_module_function(
         controller,
         c_name(CONTROLLER_RELEASE_EX_NAME),
         Some(controller_bool_false),
-        1,
+        -1,
     );
     rb_define_module_function(
         controller,
         c_name(CONTROLLER_REPEATCOUNT_NAME),
         Some(controller_zero),
-        1,
+        -1,
     );
     rb_define_module_function(
         controller,
         c_name(CONTROLLER_TIME_EX_NAME),
         Some(controller_float_zero),
-        1,
+        -1,
     );
 }
 
@@ -676,8 +687,18 @@ unsafe extern "C" fn input_raw_key_states(
     _argv: *const VALUE,
     _self: VALUE,
 ) -> VALUE {
-    // Raw key states are not tracked yet; return an empty array to remain API-compatible.
-    rb_sys::rb_ary_new()
+    let ary = rb_sys::rb_ary_new_capa(256);
+    let states = RAW_KEY_STATES.read().ok();
+    for i in 0usize..256 {
+        let pressed = states.as_ref().map(|s| s[i]).unwrap_or(false);
+        let val = if pressed {
+            rb_sys::Qtrue as VALUE
+        } else {
+            rb_sys::Qfalse as VALUE
+        };
+        rb_sys::rb_ary_push(ary, val);
+    }
+    ary
 }
 
 unsafe extern "C" fn input_text_input(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {

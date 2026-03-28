@@ -37,6 +37,9 @@ end
 
 module RGSS
   module Runtime
+    @pending_suspend = false
+    @low_memory = false
+
     class << self
       attr_reader :main_fiber
 
@@ -82,11 +85,36 @@ module RGSS
       def reset
         @main_fiber = nil
       end
+
+      def notify_suspend
+        @pending_suspend = true
+      end
+
+      def notify_resume
+        @pending_suspend = false
+      end
+
+      def notify_low_memory
+        @low_memory = true
+      end
+
+      def pending_events?
+        !!@pending_suspend
+      end
+
+      def consume_low_memory!
+        flag = @low_memory
+        @low_memory = false
+        flag
+      end
     end
   end
 end
 
 class Hangup < Exception; end
+
+# Raised by the game (or the engine on F12) to restart the entire script loop.
+class Reset < Exception; end
 
 unless Numeric.method_defined?(:to_i)
   class Numeric
@@ -188,6 +216,11 @@ unless String.method_defined?(:clone)
   end
 end
 
+# Capture Marshal.dump before any game script can shadow it.
+# For Marshal.load we use RGSS::Native.marshal_load which calls rb_marshal_load
+# at the C level, bypassing any Ruby-level method dispatch corruption.
+RGSS_MARSHAL_DUMP = Marshal.method(:dump)
+
 module Kernel
   def data_path(relative = '')
     RGSS::Native.project_path(relative.to_s)
@@ -195,12 +228,12 @@ module Kernel
 
   def load_data(filename)
     path = resolve_rgss_read_path(filename)
-    File.open(path, 'rb') { |f| Marshal.send(:load, f) }
+    RGSS::Native.marshal_load(path)
   end
 
   def save_data(object, filename)
     path = resolve_rgss_write_path(filename)
-    File.open(path, 'wb') { |f| Marshal.send(:dump, object, f) }
+    File.open(path, 'wb') { |f| RGSS_MARSHAL_DUMP.call(object, f) }
     object
   end
 
@@ -227,22 +260,6 @@ module Kernel
     path
   end
 
-  if method_defined?(:rgss_stop) && !method_defined?(:__rgss_native_stop)
-    alias_method :__rgss_native_stop, :rgss_stop
-  end
-
-  def rgss_main(&block)
-    unless block
-      RGSS::Debug.warn_once('rgss_main requires a block')
-      return
-    end
-    RGSS::Runtime.install_main(&block)
-  end
-
-  def rgss_stop
-    RGSS::Runtime.reset
-    __rgss_native_stop if defined?(__rgss_native_stop)
-  end
 end
 
 module Graphics
@@ -277,5 +294,6 @@ module Graphics
       color ||= Color.new(255, 255, 255, 255)
       _flash(color.red, color.green, color.blue, color.alpha, duration.to_i)
     end
+
   end
 end

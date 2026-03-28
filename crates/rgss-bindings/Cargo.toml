@@ -16,6 +16,7 @@ open = "5"
 sysinfo = { version = "0.30", default-features = false }
 walkdir = "2.5"
 arboard = "3.6"
+parking_lot = { workspace = true }
 
 [build-dependencies]
 rb-sys-build = "0.9.124"

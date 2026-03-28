@@ -276,62 +276,62 @@ pub fn advance_flash(id: u32) {
 
 unsafe fn define_sprite_api() -> Result<()> {
     let native = native_module()?;
-    rb_define_module_function(native, c_name(CREATE_NAME), Some(sprite_create), 1);
-    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(sprite_dispose), 1);
+    rb_define_module_function(native, c_name(CREATE_NAME), Some(sprite_create), -1);
+    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(sprite_dispose), -1);
     rb_define_module_function(
         native,
         c_name(SET_VIEWPORT_NAME),
         Some(sprite_set_viewport),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_BITMAP_NAME), Some(sprite_set_bitmap), 2);
-    rb_define_module_function(native, c_name(SET_X_NAME), Some(sprite_set_x), 2);
-    rb_define_module_function(native, c_name(SET_Y_NAME), Some(sprite_set_y), 2);
-    rb_define_module_function(native, c_name(SET_Z_NAME), Some(sprite_set_z), 2);
-    rb_define_module_function(native, c_name(SET_OX_NAME), Some(sprite_set_ox), 2);
-    rb_define_module_function(native, c_name(SET_OY_NAME), Some(sprite_set_oy), 2);
-    rb_define_module_function(native, c_name(SET_ZOOM_X_NAME), Some(sprite_set_zoom_x), 2);
-    rb_define_module_function(native, c_name(SET_ZOOM_Y_NAME), Some(sprite_set_zoom_y), 2);
-    rb_define_module_function(native, c_name(SET_ANGLE_NAME), Some(sprite_set_angle), 2);
-    rb_define_module_function(native, c_name(SET_MIRROR_NAME), Some(sprite_set_mirror), 2);
+    rb_define_module_function(native, c_name(SET_BITMAP_NAME), Some(sprite_set_bitmap), -1);
+    rb_define_module_function(native, c_name(SET_X_NAME), Some(sprite_set_x), -1);
+    rb_define_module_function(native, c_name(SET_Y_NAME), Some(sprite_set_y), -1);
+    rb_define_module_function(native, c_name(SET_Z_NAME), Some(sprite_set_z), -1);
+    rb_define_module_function(native, c_name(SET_OX_NAME), Some(sprite_set_ox), -1);
+    rb_define_module_function(native, c_name(SET_OY_NAME), Some(sprite_set_oy), -1);
+    rb_define_module_function(native, c_name(SET_ZOOM_X_NAME), Some(sprite_set_zoom_x), -1);
+    rb_define_module_function(native, c_name(SET_ZOOM_Y_NAME), Some(sprite_set_zoom_y), -1);
+    rb_define_module_function(native, c_name(SET_ANGLE_NAME), Some(sprite_set_angle), -1);
+    rb_define_module_function(native, c_name(SET_MIRROR_NAME), Some(sprite_set_mirror), -1);
     rb_define_module_function(
         native,
         c_name(SET_BUSH_DEPTH_NAME),
         Some(sprite_set_bush_depth),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_OPACITY_NAME),
         Some(sprite_set_opacity),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_BLEND_TYPE_NAME),
         Some(sprite_set_blend_type),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_BUSH_OPACITY_NAME),
         Some(sprite_set_bush_opacity),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_VISIBLE_NAME),
         Some(sprite_set_visible),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_SRC_RECT_NAME),
         Some(sprite_set_src_rect),
-        5,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(sprite_set_color), 5);
-    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(sprite_set_tone), 5);
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(sprite_set_color), -1);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(sprite_set_tone), -1);
     Ok(())
 }
 

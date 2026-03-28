@@ -1,8 +1,7 @@
-use crate::input::InputState;
 use image::RgbaImage;
 use render::{
-    AutotileTexture, Camera, ClipRect, FallbackScene, PlaneInstance, PlayerMarker, RenderFrame,
-    SpriteInstance, TileScene, TilemapFlashMap, TilemapInstance, WindowInstance,
+    AutotileTexture, Camera, ClipRect, FallbackScene, PlaneInstance, RenderFrame, SpriteInstance,
+    TileScene, TilemapFlashMap, TilemapInstance, WindowInstance,
 };
 use rgss_bindings::{
     bitmap_snapshot, plane_snapshot, sprite_snapshot, tilemap_snapshot, viewport_snapshot,
@@ -10,15 +9,12 @@ use rgss_bindings::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-const PLAYER_SPEED_TILES_PER_SEC: f32 = 4.0;
 const WINDOW_PADDING: i32 = 16;
 
 pub struct GameState {
     fallback_scene: Option<TileScene>,
-    player: GamePlayer,
-    player_color: [u8; 4],
+    fallback_camera: Option<Camera>,
     screen_size: (u32, u32),
     tilemaps: Vec<TilemapInstance>,
     sprites: Vec<SpriteInstance>,
@@ -28,22 +24,17 @@ pub struct GameState {
 
 impl GameState {
     pub fn new(scene: Option<TileScene>, start: (f32, f32), viewport: (u32, u32)) -> Self {
+        let fallback_camera = scene
+            .as_ref()
+            .map(|scene| camera_centered(scene, start, viewport));
         Self {
             fallback_scene: scene,
-            player: GamePlayer::new(start),
-            player_color: [0, 255, 255, 180],
+            fallback_camera,
             screen_size: viewport,
             tilemaps: Vec::new(),
             sprites: Vec::new(),
             planes: Vec::new(),
             windows: Vec::new(),
-        }
-    }
-
-    pub fn update(&mut self, dt: Duration, input: &InputState) {
-        if let Some(scene) = self.fallback_scene.as_ref() {
-            self.player
-                .update(dt, input, scene.map_width, scene.map_height);
         }
     }
 
@@ -62,8 +53,10 @@ impl GameState {
         let scene = self.fallback_scene.as_ref()?;
         let fallback = FallbackScene {
             scene,
-            camera: self.camera(scene),
-            player_marker: self.player_marker(),
+            camera: self
+                .fallback_camera
+                .unwrap_or_else(|| camera_centered(scene, (0.0, 0.0), self.screen_size)),
+            player_marker: None,
             sprites: &[],
         };
         Some(RenderFrame {
@@ -73,23 +66,6 @@ impl GameState {
             windows: &[],
             fallback: Some(fallback),
         })
-    }
-
-    fn camera(&self, scene: &TileScene) -> Camera {
-        let tile_px = scene.tile_size as f32;
-        let map_px_w = scene.map_width as f32 * tile_px;
-        let map_px_h = scene.map_height as f32 * tile_px;
-        let viewport_w = self.screen_size.0 as f32;
-        let viewport_h = self.screen_size.1 as f32;
-        let player_center_x = (self.player.position.0 + 0.5) * tile_px;
-        let player_center_y = (self.player.position.1 + 0.5) * tile_px;
-        let max_x = (map_px_w - viewport_w).max(0.0);
-        let max_y = (map_px_h - viewport_h).max(0.0);
-        let origin_x = player_center_x - viewport_w / 2.0;
-        let origin_y = player_center_y - viewport_h / 2.0;
-        Camera {
-            origin: (origin_x.clamp(0.0, max_x), origin_y.clamp(0.0, max_y)),
-        }
     }
 
     fn rebuild_rgss_state(&mut self, textures: &HashMap<u32, Arc<RgbaImage>>) {
@@ -520,47 +496,6 @@ impl GameState {
             flash_phase: tilemap.flash_phase,
         })
     }
-
-    fn player_marker(&self) -> Option<PlayerMarker> {
-        Some(PlayerMarker {
-            tile_pos: self.player.position,
-            color: self.player_color,
-        })
-    }
-}
-
-struct GamePlayer {
-    position: (f32, f32),
-    speed: f32,
-}
-
-impl GamePlayer {
-    fn new(start: (f32, f32)) -> Self {
-        Self {
-            position: start,
-            speed: PLAYER_SPEED_TILES_PER_SEC,
-        }
-    }
-
-    fn update(&mut self, dt: Duration, input: &InputState, width: usize, height: usize) {
-        let mut dir_x = input.dir_x;
-        let mut dir_y = input.dir_y;
-        if dir_x != 0.0 || dir_y != 0.0 {
-            let len = (dir_x * dir_x + dir_y * dir_y)
-                .sqrt()
-                .max(std::f32::EPSILON);
-            dir_x /= len;
-            dir_y /= len;
-        }
-        let delta = self.speed * dt.as_secs_f32();
-        let mut x = self.position.0 + dir_x * delta;
-        let mut y = self.position.1 + dir_y * delta;
-        let max_x = width.max(1) as f32 - 0.01;
-        let max_y = height.max(1) as f32 - 0.01;
-        x = x.clamp(0.0, max_x);
-        y = y.clamp(0.0, max_y);
-        self.position = (x, y);
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -585,6 +520,23 @@ impl ViewportInfo {
             tone: [0.0; 4],
             color: [0.0; 4],
         }
+    }
+}
+
+fn camera_centered(scene: &TileScene, focus: (f32, f32), screen: (u32, u32)) -> Camera {
+    let tile_px = scene.tile_size as f32;
+    let map_px_w = scene.map_width as f32 * tile_px;
+    let map_px_h = scene.map_height as f32 * tile_px;
+    let viewport_w = screen.0 as f32;
+    let viewport_h = screen.1 as f32;
+    let focus_x = (focus.0 + 0.5) * tile_px;
+    let focus_y = (focus.1 + 0.5) * tile_px;
+    let max_x = (map_px_w - viewport_w).max(0.0);
+    let max_y = (map_px_h - viewport_h).max(0.0);
+    let origin_x = focus_x - viewport_w / 2.0;
+    let origin_y = focus_y - viewport_h / 2.0;
+    Camera {
+        origin: (origin_x.clamp(0.0, max_x), origin_y.clamp(0.0, max_y)),
     }
 }
 

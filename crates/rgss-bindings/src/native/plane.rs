@@ -139,30 +139,30 @@ pub fn set_tone(id: u32, tone: ToneData) {
 
 unsafe fn define_plane_api() -> Result<()> {
     let native = native_module()?;
-    rb_define_module_function(native, c_name(CREATE_NAME), Some(plane_create), 1);
-    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(plane_dispose), 1);
+    rb_define_module_function(native, c_name(CREATE_NAME), Some(plane_create), -1);
+    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(plane_dispose), -1);
     rb_define_module_function(
         native,
         c_name(SET_VIEWPORT_NAME),
         Some(plane_set_viewport),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_BITMAP_NAME), Some(plane_set_bitmap), 2);
-    rb_define_module_function(native, c_name(SET_Z_NAME), Some(plane_set_z), 2);
-    rb_define_module_function(native, c_name(SET_OX_NAME), Some(plane_set_ox), 2);
-    rb_define_module_function(native, c_name(SET_OY_NAME), Some(plane_set_oy), 2);
-    rb_define_module_function(native, c_name(SET_ZOOM_X_NAME), Some(plane_set_zoom_x), 2);
-    rb_define_module_function(native, c_name(SET_ZOOM_Y_NAME), Some(plane_set_zoom_y), 2);
-    rb_define_module_function(native, c_name(SET_OPACITY_NAME), Some(plane_set_opacity), 2);
+    rb_define_module_function(native, c_name(SET_BITMAP_NAME), Some(plane_set_bitmap), -1);
+    rb_define_module_function(native, c_name(SET_Z_NAME), Some(plane_set_z), -1);
+    rb_define_module_function(native, c_name(SET_OX_NAME), Some(plane_set_ox), -1);
+    rb_define_module_function(native, c_name(SET_OY_NAME), Some(plane_set_oy), -1);
+    rb_define_module_function(native, c_name(SET_ZOOM_X_NAME), Some(plane_set_zoom_x), -1);
+    rb_define_module_function(native, c_name(SET_ZOOM_Y_NAME), Some(plane_set_zoom_y), -1);
+    rb_define_module_function(native, c_name(SET_OPACITY_NAME), Some(plane_set_opacity), -1);
     rb_define_module_function(
         native,
         c_name(SET_BLEND_TYPE_NAME),
         Some(plane_set_blend_type),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_VISIBLE_NAME), Some(plane_set_visible), 2);
-    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(plane_set_color), 5);
-    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(plane_set_tone), 5);
+    rb_define_module_function(native, c_name(SET_VISIBLE_NAME), Some(plane_set_visible), -1);
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(plane_set_color), -1);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(plane_set_tone), -1);
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use audio::AudioSystem;
+use audio::{AudioHandle, AudioSystem};
 use game::GameState;
 use image::RgbaImage;
 use input::InputState;
@@ -8,18 +8,19 @@ use platform::{self, EngineConfig};
 use project::{GameDatabase, GameProject};
 use render::{AutotileTexture, Renderer, TileScene};
 use rgss_bindings::{
-    install_window_hooks, native_snapshot, request_hangup, set_config_dir as rgss_set_config_dir,
-    set_game_title, set_platform_info, set_project_root, set_save_dir as rgss_set_save_dir,
-    sync_graphics_size, update_frame_delta, update_input, PlatformInfo, RubyVm, ScriptSection,
-    WindowHooks,
+    current_frame_rate, graphics_tick, install_audio_hooks, install_window_hooks, native_snapshot, request_hangup,
+    set_config_dir as rgss_set_config_dir, set_game_title, set_platform_info, set_project_root,
+    set_save_dir as rgss_set_save_dir, sync_graphics_size, update_frame_delta, update_input,
+    AudioHooks, MainLoopOutcome, PlatformInfo, RubyVm, ScriptSection, WindowHooks,
 };
 use rmxp_data::{MapData, SystemData};
 use std::{
     env,
+    path::Path,
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use winit::{
     dpi::{LogicalSize, PhysicalPosition},
     event::{ElementState, Event, Ime, WindowEvent},
@@ -49,8 +50,6 @@ impl AppConfig {
         }
     }
 }
-
-const FIXED_TIMESTEP: Duration = Duration::from_nanos(16_666_667);
 
 struct FinalizedConfig {
     window_width: u32,
@@ -114,6 +113,7 @@ pub fn run(config: AppConfig) -> Result<()> {
 
     let mut ruby_vm = RubyVm::new();
     ruby_vm.boot()?;
+    let mut loaded_scripts: Option<Vec<rmxp_data::ScriptEntry>> = None;
     if let Some(project_ref) = project.as_ref() {
         match project_ref.load_scripts() {
             Ok(scripts) => {
@@ -122,30 +122,33 @@ pub fn run(config: AppConfig) -> Result<()> {
                     scripts = scripts.len(),
                     "scripts parsed"
                 );
-                let sections: Vec<_> = scripts
-                    .iter()
-                    .map(|entry| ScriptSection {
-                        id: entry.id,
-                        name: entry.name.as_str(),
-                        source: entry.source.as_str(),
-                    })
-                    .collect();
-                if let Err(err) = ruby_vm.run_scripts(&sections) {
-                    warn!(target: "rgss", error = %err, "Failed to evaluate RGSS scripts");
-                }
-                let snapshot = native_snapshot();
-                info!(
-                    target: "rgss",
-                    bitmaps = snapshot.bitmaps,
-                    sprites = snapshot.sprites,
-                    viewports = snapshot.viewports,
-                    windows = snapshot.windows,
-                    "RGSS native bridge ready"
-                );
+                loaded_scripts = Some(scripts);
             }
             Err(err) => {
                 warn!(target: "project", error = %err, "Failed to load Scripts.rxdata");
             }
+        }
+        if let Some(ref scripts) = loaded_scripts {
+            let sections: Vec<_> = scripts
+                .iter()
+                .map(|entry| ScriptSection {
+                    id: entry.id,
+                    name: entry.name.as_str(),
+                    source: entry.source.as_str(),
+                })
+                .collect();
+            if let Err(err) = ruby_vm.run_scripts(&sections) {
+                warn!(target: "rgss", error = %err, "Failed to evaluate RGSS scripts");
+            }
+            let snapshot = native_snapshot();
+            info!(
+                target: "rgss",
+                bitmaps = snapshot.bitmaps,
+                sprites = snapshot.sprites,
+                viewports = snapshot.viewports,
+                windows = snapshot.windows,
+                "RGSS native bridge ready"
+            );
         }
     }
 
@@ -177,11 +180,12 @@ pub fn run(config: AppConfig) -> Result<()> {
     let mut renderer = Renderer::new(unsafe { &*window_ptr }, cfg.window_width, cfg.window_height)?;
     sync_graphics_size(cfg.window_width, cfg.window_height);
     rgss_bindings::sync_graphics_size(cfg.window_width, cfg.window_height);
-    let _audio = AudioSystem::new()?;
+    let audio = AudioSystem::new()?;
+    install_audio_hooks(bind_audio_hooks(audio.handle()));
+    let _audio = audio;
 
     let mut input = WinitInputHelper::new();
     let mut input_state = InputState::default();
-    let mut accumulator = Duration::ZERO;
     let mut last_tick = Instant::now();
     let mut frame_index: u64 = 0;
     let mut exit_requested = false;
@@ -232,37 +236,71 @@ pub fn run(config: AppConfig) -> Result<()> {
                 }
             }
             Event::AboutToWait => {
-                let now = Instant::now();
-                let delta = now - last_tick;
-                last_tick = now;
+                let frame_start = Instant::now();
+                let delta = frame_start - last_tick;
+                last_tick = frame_start;
                 update_frame_delta(delta.as_secs_f64());
-                accumulator += delta;
-                while accumulator >= FIXED_TIMESTEP {
-                    update_input(input_state.snapshot());
-                    match ruby_vm.resume_main_loop() {
-                        Ok(true) => {
-                            had_main_loop = true;
-                        }
-                        Ok(false) => {
-                            if exit_requested || had_main_loop {
-                                target.exit();
-                                return;
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                target: "rgss",
-                                error = %err,
-                                "Ruby main loop error; stopping updates"
-                            );
+                graphics_tick(delta.as_secs_f64());
+                update_input(input_state.snapshot());
+                match ruby_vm.resume_main_loop() {
+                    Ok(MainLoopOutcome::Active) => {
+                        had_main_loop = true;
+                    }
+                    Ok(MainLoopOutcome::Done) => {
+                        if exit_requested || had_main_loop {
                             target.exit();
                             return;
                         }
                     }
-                    game.update(FIXED_TIMESTEP, &input_state);
-                    accumulator -= FIXED_TIMESTEP;
+                    Ok(MainLoopOutcome::Reset) => {
+                        // Re-evaluate all scripts from scratch (F12 / game reset).
+                        if let Some(ref scripts) = loaded_scripts {
+                            let sections: Vec<_> = scripts
+                                .iter()
+                                .map(|entry| ScriptSection {
+                                    id: entry.id,
+                                    name: entry.name.as_str(),
+                                    source: entry.source.as_str(),
+                                })
+                                .collect();
+                            if let Err(err) = ruby_vm.run_scripts(&sections) {
+                                warn!(target: "rgss", error = %err, "Reset: failed to re-evaluate scripts");
+                                target.exit();
+                                return;
+                            }
+                            had_main_loop = ruby_vm.has_main_loop();
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "rgss",
+                            error = %err,
+                            "Ruby main loop error; stopping updates"
+                        );
+                        target.exit();
+                        return;
+                    }
                 }
                 window_ref.request_redraw();
+                // Throttle to the target frame rate set by Graphics.frame_rate=.
+                let target_fps = current_frame_rate() as f64;
+                if target_fps > 0.0 {
+                    let target_frame = Duration::from_secs_f64(1.0 / target_fps);
+                    let elapsed = frame_start.elapsed();
+                    if elapsed < target_frame {
+                        std::thread::sleep(target_frame - elapsed);
+                    }
+                }
+            }
+            Event::Suspended => {
+                if let Err(err) = rgss_bindings::notify_suspend() {
+                    warn!(target: "rgss", error = %err, "Failed to notify suspend");
+                }
+            }
+            Event::Resumed => {
+                if let Err(err) = rgss_bindings::notify_resume() {
+                    warn!(target: "rgss", error = %err, "Failed to notify resume");
+                }
             }
             _ => {}
         }
@@ -377,6 +415,107 @@ fn resolve_start_map_id(system: &SystemData) -> i32 {
         }
     }
     system.start_map_id.max(1)
+}
+
+fn bind_audio_hooks(audio: AudioHandle) -> AudioHooks {
+    AudioHooks {
+        bgm_play: {
+            let audio = audio.clone();
+            Box::new(move |cmd| {
+                log_audio_result(
+                    "bgm_play",
+                    Some(&cmd.path),
+                    audio.play_bgm(&cmd.path, cmd.volume, cmd.pitch, cmd.position),
+                );
+            })
+        },
+        bgm_stop: {
+            let audio = audio.clone();
+            Box::new(move |_| audio.stop_bgm())
+        },
+        bgm_fade: {
+            let audio = audio.clone();
+            Box::new(move |frames| audio.fade_bgm(frames))
+        },
+        bgs_play: {
+            let audio = audio.clone();
+            Box::new(move |cmd| {
+                log_audio_result(
+                    "bgs_play",
+                    Some(&cmd.path),
+                    audio.play_bgs(&cmd.path, cmd.volume, cmd.pitch, cmd.position),
+                );
+            })
+        },
+        bgs_stop: {
+            let audio = audio.clone();
+            Box::new(move |_| audio.stop_bgs())
+        },
+        bgs_fade: {
+            let audio = audio.clone();
+            Box::new(move |frames| audio.fade_bgs(frames))
+        },
+        me_play: {
+            let audio = audio.clone();
+            Box::new(move |cmd| {
+                log_audio_result(
+                    "me_play",
+                    Some(&cmd.path),
+                    audio.play_me(&cmd.path, cmd.volume, cmd.pitch),
+                );
+            })
+        },
+        me_stop: {
+            let audio = audio.clone();
+            Box::new(move |_| audio.stop_me())
+        },
+        me_fade: {
+            let audio = audio.clone();
+            Box::new(move |frames| audio.fade_me(frames))
+        },
+        se_play: {
+            let audio = audio.clone();
+            Box::new(move |cmd| {
+                log_audio_result(
+                    "se_play",
+                    Some(&cmd.path),
+                    audio.play_se(&cmd.path, cmd.volume, cmd.pitch),
+                );
+            })
+        },
+        se_stop: {
+            let audio = audio.clone();
+            Box::new(move |_| audio.stop_all_se())
+        },
+        se_fade: {
+            let audio = audio.clone();
+            Box::new(move |frames| audio.fade_all_se(frames))
+        },
+    }
+}
+
+fn log_audio_result(
+    method: &str,
+    path: Option<&Path>,
+    result: std::result::Result<(), audio::AudioError>,
+) {
+    if let Err(err) = result {
+        match path {
+            Some(p) => error!(
+                target: "audio",
+                method = %method,
+                file = %p.display(),
+                error = %err,
+                "Audio backend error"
+            ),
+            None => error!(
+                target: "audio",
+                method = %method,
+                error = %err,
+                "Audio backend error"
+            ),
+        }
+    }
 }
 
 fn register_window_hooks(window_ptr: *mut winit::window::Window, initial_title: &str) {

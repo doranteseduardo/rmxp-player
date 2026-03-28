@@ -1,6 +1,7 @@
 use super::common::{
-    bool_to_value, define_method, get_typed_data, install_allocator, int_to_value, wrap_typed_data,
-    DataTypeBuilder, StaticDataType,
+    bool_to_value, bytes_to_str, define_method, define_singleton_method, get_typed_data,
+    install_allocator, int_to_value, ruby_string_bytes, wrap_typed_data, DataTypeBuilder,
+    StaticDataType,
 };
 use crate::native::{value_to_i32, RectData};
 use anyhow::Result;
@@ -34,6 +35,10 @@ static METHOD_EQUAL: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"==\0") });
 static METHOD_TO_A: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
+static METHOD_DUMP: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_dump\0") });
+static METHOD_LOAD: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_load\0") });
 static METHOD_X: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"x\0") });
 static METHOD_X_SET: Lazy<&'static CStr> =
@@ -89,6 +94,8 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_DUP, rect_dup, 0);
         define_method(klass, *METHOD_EQUAL, rect_equal, -1);
         define_method(klass, *METHOD_TO_A, rect_to_a, 0);
+        define_method(klass, *METHOD_DUMP, rect_dump, -1);
+        define_singleton_method(klass, *METHOD_LOAD, rect_load, -1);
     }
     Ok(())
 }
@@ -206,6 +213,38 @@ unsafe extern "C" fn rect_to_a(_argc: c_int, _argv: *const VALUE, self_value: VA
     rb_ary_push(array, int_to_value(rect.width as i64));
     rb_ary_push(array, int_to_value(rect.height as i64));
     array
+}
+
+unsafe extern "C" fn rect_dump(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let r = get_rect_mut(self_value);
+    let mut buf = [0u8; 32];
+    buf[0..8].copy_from_slice(&(r.x as f64).to_le_bytes());
+    buf[8..16].copy_from_slice(&(r.y as f64).to_le_bytes());
+    buf[16..24].copy_from_slice(&(r.width as f64).to_le_bytes());
+    buf[24..32].copy_from_slice(&(r.height as f64).to_le_bytes());
+    bytes_to_str(&buf)
+}
+
+unsafe extern "C" fn rect_load(argc: c_int, argv: *const VALUE, klass: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let bytes = match ruby_string_bytes(args[0]) {
+        Some(b) if b.len() >= 32 => b,
+        _ => return rect_allocate_internal(klass),
+    };
+    let x = f64::from_le_bytes(bytes[0..8].try_into().unwrap()) as i32;
+    let y = f64::from_le_bytes(bytes[8..16].try_into().unwrap()) as i32;
+    let w = f64::from_le_bytes(bytes[16..24].try_into().unwrap()) as i32;
+    let h = f64::from_le_bytes(bytes[24..32].try_into().unwrap()) as i32;
+    let obj = rect_allocate_internal(klass);
+    let data = get_rect_mut(obj);
+    data.x = x;
+    data.y = y;
+    data.width = w;
+    data.height = h;
+    obj
 }
 
 pub fn new_rect(x: i32, y: i32, width: i32, height: i32) -> VALUE {

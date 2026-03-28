@@ -49,6 +49,10 @@
 - Window close events no longer abort the process; instead they request a
   `Graphics` hangup that raises the RGSS `Hangup` exception on the next
   `Graphics.update`, matching mkxp-z’s lifecycle semantics.
+- Kernel `rgss_main`/`rgss_stop` are handled entirely in Rust now: the VM
+  captures the scene block, resumes it through `RGSS::Runtime`, and exposes a
+  native interpreter command queue (`RGSS::Native.interpreter_request_*`) so Ruby
+  can request pauses or map reloads without custom shims.
 - The extended mkxp-z `System` APIs (platform/OS queries, CPU & memory info,
   CSV parsing, launcher helpers, default font family, file existence checks) are
   implemented, so projects that lean on those helpers no longer crash during
@@ -64,14 +68,112 @@
   rectangles respect `ox/oy` so scrolled contents keep their highlight and tone/
   color operations mirror the reference implementation.
 
-## 🚧 Immediate Goals
+## ✅ MVP Unblocking Pass (2026-03-28)
 
-1. **Scene Loop Integration** – execute `Scripts.rxdata`, drive the RGSS scene
-   stack (Game_Map/Game_Player/Game_Interpreter), and let Ruby advance maps,
-   characters, and UI transitions end-to-end.
-2. **Audio Playback** – wire RGSS `Audio.*` calls to the rodio/CPAL backend with
-   fades, loop points, and MIDI via `rustysynth`.
-3. **Event/Interpreter Core** – implement map passability, event triggers,
-   message windows, and script callbacks so vanilla events run unchanged.
-4. **Persistence & Mobile Shells** – add save slots/config, then wire Swift/
-   Kotlin launchers that reuse the Rust core on iOS/Android.
+All items below were the six critical gaps between the existing foundation and
+a playable vanilla RMXP title screen. Every item is now implemented and the
+workspace builds cleanly with zero warnings.
+
+- **Reset exception loop** – `runtime.rs` detects the `Reset` Ruby exception via
+  `rb_obj_is_kind_of`, clears it, and returns `MainResult::Reset` up the call
+  stack. `engine-core` re-evaluates the full `Scripts.rxdata` section list in
+  place, then the next frame picks up the fresh Fiber. F12 / in-game resets now
+  work correctly.
+- **`$RGSS_SCRIPTS` global** – `run_scripts()` builds a Ruby array of
+  `[id, name, ""]` tuples via `rb_sys` and assigns it to `$RGSS_SCRIPTS` before
+  evaluating any section. Script-existence checks (e.g. Essentials version
+  detection) no longer raise `NameError`.
+- **`Reset` class** – defined in `primitives.rb` as `class Reset < Exception; end`
+  so game scripts that call `raise Reset` work without a native binding.
+- **Preload chain** – `scripts.rs` now evaluates five layers before any user
+  script runs:
+  1. `primitives.rb` — `RGSS::Runtime`, `Hangup`, `Reset`, data I/O helpers.
+  2. `classic.rb` — Ruby 1.x→3.x shims (`Hash#index`, `Object#id/type`,
+     `TRUE`/`FALSE`/`NIL`, `BasicObject#initialize`).
+  3. `module_rpg1.rb` — full `RPG` namespace decoded from mkxp-z's
+     `binding/module_rpg1.rb.xxd`: `RPG::Cache`, `RPG::Sprite`, `RPG::Map`,
+     `RPG::Tileset`, `RPG::Animation`, `RPG::CommonEvent`, and the rest of the
+     1477-line RGSS 1 stdlib.
+  4. `mkxp_wrap.rb` — `MKXP` compatibility aliases for older mkxp API names.
+  5. `win32.rb` — Cross-platform `Win32API` class. Routes `User32` calls
+     (`GetKeyState`, `GetAsyncKeyState`, `GetKeyboardState`, `ShowCursor`,
+     `GetCursorPos`, `GetClientRect`, `ScreenToClient`, `FindWindowA`,
+     `Keybd_event` fullscreen toggle) to native equivalents. Unknown DLL/function
+     combinations are tolerated silently.
+- **ME auto-resume BGM** – `AudioHandle::play_me` snapshots `BgmState`
+  (path/volume/position) before stopping BGM, then spawns a monitor thread that
+  polls `me_sink.empty()` every 100 ms and calls `mixer.play_bgm(state)` once
+  the ME finishes, matching mkxp-z's auto-restore semantics.
+- **`eval_preload` helper** – `RubyVm::eval_preload(code, label)` wraps
+  `eval` with a `ScriptLabelGuard` so preload errors report their origin label
+  instead of `(unknown script)`.
+
+## ✅ MVP Blocking/Near-Blocking Gaps Resolved
+
+All six blocking and near-blocking gaps are now closed. Only polish items remain.
+
+## ✅ Pokémon Essentials Boot Chain (2026-03-28)
+
+Fixed all blocking issues preventing PE 21.1 from booting. The engine now loads
+all 402 PE scripts and reaches the splash screen.
+
+- **`RGSS::Native.marshal_load(path)`** — Added a Rust-backed native function
+  that reads a file with `std::fs::read` and calls `rb_marshal_load` at the C
+  level, bypassing Ruby-level `Marshal.load` dispatch entirely. PE protection
+  scripts remove `Marshal.load`'s singleton method (causing `Kernel#load` to be
+  dispatched instead, which executes rxdata as Ruby source and returns `true`).
+  The C-level call is immune to this.
+
+- **Value class `_dump`/`_load`** — All four native value classes now serialise
+  and deserialise correctly with Marshal:
+  - `Table` — mkxp-z binary format: `[dim:i32][xsize:i32][ysize:i32][zsize:i32][count:i32][data:i16*]`
+  - `Color`, `Tone`, `Rect` — 32-byte format: four `f64` LE values
+
+- **`argc=-1` calling convention fix** — All 69 `rb_define_module_function`
+  registrations used a positive `argc` (1, 2, 4, 5…) but the C function had the
+  variadic `(c_int, *const VALUE, VALUE)` signature. Ruby's ABI for fixed-argc
+  methods passes `(self, arg1, arg2…)` instead of `(argc, argv, self)`, so
+  `argc` was receiving the module's VALUE (garbage) and `argv` was receiving the
+  first argument's VALUE as a raw pointer — causing misaligned dereference
+  panics and TypeError crashes. Fixed globally by changing every positive argc
+  to `-1`.
+
+- **Sprite graceful degradation** — `get_sprite` now returns `Option` so methods
+  called on Sprite subclasses that bypass the native allocator return `nil`
+  instead of panicking.
+
+## 🚧 Polish (game runs, rough edges)
+
+These are the known gaps between the current state and a fully playable vanilla
+RMXP game (title screen + first map walkable). None require architectural
+changes — all are additive.
+
+### Resolved
+
+- ✅ `Graphics.frame_rate=` throttles the winit loop via `current_frame_rate()` sleep.
+- ✅ `Input.raw_key_states` returns a live 256-element SDL/USB-HID scancode array.
+- ✅ All value classes (`Table`, `Color`, `Tone`, `Rect`) have native `_dump`/`_load`.
+- ✅ PE 21.1 boots to the splash screen with all 402 scripts loaded.
+
+### Remaining
+
+1. **`Font` rendering** – `Font.default_name/size/bold/italic` class defaults exist
+   but `Bitmap#draw_text` always uses the built-in 8×8 raster font. TTF rendering
+   not yet integrated.
+
+2. **`Audio.bgm_memorize`/`bgm_restore` state** – Ruby-side hooks are bound; the
+   memorize slot is not yet shared with the ME auto-resume slot, so explicit calls
+   don't persist across ME playback.
+
+3. **Window open/close tweening** – `openness` is applied instantly; should ease
+   over several frames matching mkxp-z's animation curve.
+
+4. **MIDI playback** – `rustysynth` integration for `.mid` BGM. Most games use
+   OGG/WAV; only affects titles that ship MIDI tracks.
+
+5. **Save-slot abstraction** – `save_data`/`load_data` work for `.rxdata` files;
+   no save-slot directory or document-picker for iOS/Android.
+
+6. **Mobile shells** – iOS/Android launchers staged; blocked on desktop stability.
+
+7. **Controller input** – Namespace stubs present; no real gamepad events yet.

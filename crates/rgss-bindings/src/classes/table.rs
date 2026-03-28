@@ -1,6 +1,6 @@
 use super::common::{
-    define_method, get_typed_data, install_allocator, int_to_value, to_c_long, wrap_typed_data,
-    DataTypeBuilder, StaticDataType,
+    define_method, define_singleton_method, get_typed_data, install_allocator, int_to_value,
+    ruby_string_bytes, to_c_long, wrap_typed_data, DataTypeBuilder, StaticDataType,
 };
 use crate::native::value_to_i32;
 use anyhow::Result;
@@ -41,6 +41,10 @@ static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
 static METHOD_PACK: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_native_s16\0") });
+static METHOD_DUMP: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_dump\0") });
+static METHOD_LOAD: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"_load\0") });
 
 #[derive(Clone)]
 struct TableValue {
@@ -75,6 +79,8 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_CLONE, table_clone, 0);
         define_method(klass, *METHOD_DUP, table_dup, 0);
         define_method(klass, *METHOD_PACK, table_pack, 0);
+        define_method(klass, *METHOD_DUMP, table_dump, -1);
+        define_singleton_method(klass, *METHOD_LOAD, table_load, -1);
     }
     Ok(())
 }
@@ -192,6 +198,70 @@ unsafe extern "C" fn table_pack(_argc: c_int, _argv: *const VALUE, self_value: V
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     rb_str_new(bytes.as_ptr() as *const c_char, to_c_long(bytes.len()))
+}
+
+/// Table#_dump(depth) → binary String
+/// Format (mkxp-z compatible): [dim:i32][xsize:i32][ysize:i32][zsize:i32][count:i32][data:i16*]
+unsafe extern "C" fn table_dump(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
+    let table = get_table_mut(self_value);
+    let elements = (table.xsize as usize)
+        .saturating_mul(table.ysize as usize)
+        .saturating_mul(table.zsize as usize);
+    let dim_flag: i32 = if table.zsize > 1 {
+        3
+    } else if table.ysize > 1 {
+        2
+    } else {
+        1
+    };
+    let mut buf: Vec<u8> = Vec::with_capacity(20 + elements * 2);
+    buf.extend_from_slice(&dim_flag.to_le_bytes());
+    buf.extend_from_slice(&table.xsize.to_le_bytes());
+    buf.extend_from_slice(&table.ysize.to_le_bytes());
+    buf.extend_from_slice(&table.zsize.to_le_bytes());
+    buf.extend_from_slice(&(elements as i32).to_le_bytes());
+    for &v in &table.data[..elements.min(table.data.len())] {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    rb_str_new(buf.as_ptr() as *const c_char, to_c_long(buf.len()))
+}
+
+/// Table._load(data_string) → Table
+unsafe extern "C" fn table_load(argc: c_int, argv: *const VALUE, klass: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = slice::from_raw_parts(argv, argc as usize);
+    let data_val = args[0];
+
+    let bytes_opt = ruby_string_bytes(data_val);
+    let obj = table_allocate(klass);
+    let bytes = match &bytes_opt {
+        Some(b) if b.len() >= 20 => b.as_slice(),
+        _ => return obj,
+    };
+
+    // Parse header
+    let xsize = i32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4]));
+    let ysize = i32::from_le_bytes(bytes[8..12].try_into().unwrap_or([0; 4]));
+    let zsize = i32::from_le_bytes(bytes[12..16].try_into().unwrap_or([0; 4]));
+    let count = i32::from_le_bytes(bytes[16..20].try_into().unwrap_or([0; 4])) as usize;
+
+    let table = get_table_mut(obj);
+    table.xsize = xsize.max(0);
+    table.ysize = ysize.max(1);
+    table.zsize = zsize.max(1);
+    let capacity = (table.xsize as usize)
+        .saturating_mul(table.ysize as usize)
+        .saturating_mul(table.zsize as usize);
+    table.data.resize(capacity, 0);
+
+    let readable = count.min(capacity).min((bytes.len() - 20) / 2);
+    for i in 0..readable {
+        let off = 20 + i * 2;
+        table.data[i] = i16::from_le_bytes([bytes[off], bytes[off + 1]]);
+    }
+    obj
 }
 
 fn index_of(table: &TableValue, x: i32, y: i32, z: i32) -> Option<usize> {

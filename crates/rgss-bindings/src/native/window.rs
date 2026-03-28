@@ -193,71 +193,71 @@ pub fn set_cursor_rect(id: u32, rect: RectData) {
 unsafe fn define_window_api() -> Result<()> {
     let native = native_module()?;
     rb_define_module_function(native, c_name(CREATE_NAME), Some(window_create), 0);
-    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(window_dispose), 1);
+    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(window_dispose), -1);
     rb_define_module_function(
         native,
         c_name(SET_VIEWPORT_NAME),
         Some(window_set_viewport),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_WINDOWS_KIND_NAME),
         Some(window_set_windowskin),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_CONTENTS_NAME),
         Some(window_set_contents),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_X_NAME), Some(window_set_x), 2);
-    rb_define_module_function(native, c_name(SET_Y_NAME), Some(window_set_y), 2);
-    rb_define_module_function(native, c_name(SET_Z_NAME), Some(window_set_z), 2);
-    rb_define_module_function(native, c_name(SET_WIDTH_NAME), Some(window_set_width), 2);
-    rb_define_module_function(native, c_name(SET_HEIGHT_NAME), Some(window_set_height), 2);
-    rb_define_module_function(native, c_name(SET_OX_NAME), Some(window_set_ox), 2);
-    rb_define_module_function(native, c_name(SET_OY_NAME), Some(window_set_oy), 2);
+    rb_define_module_function(native, c_name(SET_X_NAME), Some(window_set_x), -1);
+    rb_define_module_function(native, c_name(SET_Y_NAME), Some(window_set_y), -1);
+    rb_define_module_function(native, c_name(SET_Z_NAME), Some(window_set_z), -1);
+    rb_define_module_function(native, c_name(SET_WIDTH_NAME), Some(window_set_width), -1);
+    rb_define_module_function(native, c_name(SET_HEIGHT_NAME), Some(window_set_height), -1);
+    rb_define_module_function(native, c_name(SET_OX_NAME), Some(window_set_ox), -1);
+    rb_define_module_function(native, c_name(SET_OY_NAME), Some(window_set_oy), -1);
     rb_define_module_function(
         native,
         c_name(SET_OPACITY_NAME),
         Some(window_set_opacity),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_BACK_OPACITY_NAME),
         Some(window_set_back_opacity),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_CONTENTS_OPACITY_NAME),
         Some(window_set_contents_opacity),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_OPENNESS_NAME),
         Some(window_set_openness),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_VISIBLE_NAME),
         Some(window_set_visible),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_ACTIVE_NAME), Some(window_set_active), 2);
-    rb_define_module_function(native, c_name(SET_PAUSE_NAME), Some(window_set_pause), 2);
-    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(window_set_tone), 5);
-    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(window_set_color), 5);
+    rb_define_module_function(native, c_name(SET_ACTIVE_NAME), Some(window_set_active), -1);
+    rb_define_module_function(native, c_name(SET_PAUSE_NAME), Some(window_set_pause), -1);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(window_set_tone), -1);
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(window_set_color), -1);
     rb_define_module_function(
         native,
         c_name(SET_CURSOR_RECT_NAME),
         Some(window_set_cursor_rect),
-        5,
+        -1,
     );
     Ok(())
 }

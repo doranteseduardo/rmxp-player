@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 use rb_sys::{rb_define_module, rb_define_module_under, rb_obj_class, rb_utf8_str_new, VALUE};
 use std::{
     ffi::{CStr, CString},
-    os::raw::{c_char, c_int},
+    os::raw::{c_char, c_int, c_long},
     path::{Path, PathBuf},
 };
 
@@ -14,6 +14,7 @@ const PROJECT_PATH_NAME: &[u8] = b"project_path\0";
 const CONFIG_PATH_NAME: &[u8] = b"config_path\0";
 const SAVE_PATH_NAME: &[u8] = b"save_path\0";
 const CLASS_OF_NAME: &[u8] = b"class_of\0";
+const MARSHAL_LOAD_NAME: &[u8] = b"marshal_load\0";
 
 static RGSS_MODULE: OnceCell<VALUE> = OnceCell::new();
 static NATIVE_MODULE: OnceCell<VALUE> = OnceCell::new();
@@ -30,6 +31,8 @@ extern "C" {
         argc: c_int,
     );
     fn rb_string_value_cstr(value: *mut VALUE) -> *const c_char;
+    fn rb_marshal_load(port: VALUE) -> VALUE;
+    fn rb_str_new(ptr: *const c_char, len: c_long) -> VALUE;
 }
 
 pub fn init() -> Result<()> {
@@ -112,7 +115,8 @@ unsafe fn define_native_functions(module: VALUE) -> Result<()> {
         0,
     );
     rb_define_module_function(module, c_name(SAVE_PATH_NAME), Some(native_save_path), 0);
-    rb_define_module_function(module, c_name(CLASS_OF_NAME), Some(native_class_of), 1);
+    rb_define_module_function(module, c_name(CLASS_OF_NAME), Some(native_class_of), -1);
+    rb_define_module_function(module, c_name(MARSHAL_LOAD_NAME), Some(native_marshal_load), -1);
     Ok(())
 }
 
@@ -156,6 +160,28 @@ unsafe extern "C" fn native_class_of(argc: c_int, argv: *const VALUE, _self: VAL
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
     rb_obj_class(args[0])
+}
+
+/// RGSS::Native.marshal_load(path_string) -> Object
+/// Reads the file at `path_string` in Rust and deserializes it with the C-level
+/// rb_marshal_load, bypassing any Ruby-level Marshal/IO method dispatch corruption.
+unsafe extern "C" fn native_marshal_load(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let args = std::slice::from_raw_parts(argv, argc as usize);
+    let mut val = args[0];
+    let ptr = rb_string_value_cstr(&mut val);
+    if ptr.is_null() {
+        return rb_sys::Qnil as VALUE;
+    }
+    let path = CStr::from_ptr(ptr).to_string_lossy();
+    let bytes = match std::fs::read(path.as_ref()) {
+        Ok(b) => b,
+        Err(_) => return rb_sys::Qnil as VALUE,
+    };
+    let rb_str = rb_str_new(bytes.as_ptr() as *const c_char, bytes.len() as c_long);
+    rb_marshal_load(rb_str)
 }
 
 fn path_to_value(path: &Path) -> VALUE {

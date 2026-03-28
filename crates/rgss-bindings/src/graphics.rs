@@ -41,6 +41,7 @@ static SMOOTH_SCALING: AtomicI32 = AtomicI32::new(0);
 static INTEGER_SCALING: AtomicBool = AtomicBool::new(false);
 static LAST_MILE_SCALING: AtomicBool = AtomicBool::new(false);
 static THREAD_SAFE: AtomicBool = AtomicBool::new(false);
+static FRAME_RESIDUAL: Lazy<RwLock<f64>> = Lazy::new(|| RwLock::new(0.0));
 
 static HANGUP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static HANGUP_CLASS: OnceCell<VALUE> = OnceCell::new();
@@ -95,6 +96,7 @@ const LAST_MILE_SCALING_NAME: &[u8] = b"last_mile_scaling\0";
 const LAST_MILE_SCALING_SET_NAME: &[u8] = b"last_mile_scaling=\0";
 const THREAD_SAFE_NAME: &[u8] = b"thread_safe\0";
 const THREAD_SAFE_SET_NAME: &[u8] = b"thread_safe=\0";
+const PENDING_EVENTS_NAME: &[u8] = b"pending_events?\0";
 
 #[derive(Clone, Copy)]
 struct ToneState {
@@ -158,9 +160,31 @@ pub fn request_hangup() {
     HANGUP_REQUESTED.store(true, Ordering::SeqCst);
 }
 
+pub fn current_frame_rate() -> u32 {
+    FRAME_RATE.load(Ordering::Relaxed).max(1)
+}
+
 #[allow(dead_code)]
 pub fn set_frame_rate(rate: u32) {
     FRAME_RATE.store(rate, Ordering::Relaxed);
+}
+
+pub fn tick(delta: f64) {
+    if delta <= 0.0 {
+        return;
+    }
+    let fps = FRAME_RATE.load(Ordering::Relaxed) as f64;
+    if fps <= 0.0 {
+        return;
+    }
+    if let Ok(mut residual) = FRAME_RESIDUAL.write() {
+        let frames = delta * fps + *residual;
+        let whole = frames.floor();
+        *residual = frames - whole;
+        if whole >= 1.0 {
+            advance_time(whole as i64);
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -226,7 +250,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(RESIZE_SCREEN_NAME),
         Some(graphics_resize_screen),
-        2,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -238,7 +262,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(SCREENSHOT_NAME),
         Some(graphics_screenshot),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -250,11 +274,11 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(BRIGHTNESS_SET_NAME),
         Some(graphics_set_brightness),
-        1,
+        -1,
     );
     rb_define_module_function(module, c_name(TONE_GET_NAME), Some(graphics_get_tone), 0);
-    rb_define_module_function(module, c_name(TONE_SET_NAME), Some(graphics_set_tone), 4);
-    rb_define_module_function(module, c_name(FLASH_NAME), Some(graphics_flash), 5);
+    rb_define_module_function(module, c_name(TONE_SET_NAME), Some(graphics_set_tone), -1);
+    rb_define_module_function(module, c_name(FLASH_NAME), Some(graphics_flash), -1);
     rb_define_module_function(module, c_name(DELTA_NAME), Some(graphics_delta), 0);
     rb_define_module_function(
         module,
@@ -273,7 +297,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(RESIZE_WINDOW_NAME),
         Some(graphics_resize_window),
-        2,
+        -1,
     );
     rb_define_module_function(module, c_name(BLUR_NAME), Some(graphics_blur), 0);
     rb_define_module_function(module, c_name(SHARPEN_NAME), Some(graphics_sharpen), 0);
@@ -293,7 +317,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(FULLSCREEN_SET_NAME),
         Some(graphics_set_fullscreen),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -305,10 +329,10 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(SHOW_CURSOR_SET_NAME),
         Some(graphics_set_show_cursor),
-        1,
+        -1,
     );
     rb_define_module_function(module, c_name(SCALE_NAME), Some(graphics_get_scale), 0);
-    rb_define_module_function(module, c_name(SCALE_SET_NAME), Some(graphics_set_scale), 1);
+    rb_define_module_function(module, c_name(SCALE_SET_NAME), Some(graphics_set_scale), -1);
     rb_define_module_function(
         module,
         c_name(FRAMESKIP_NAME),
@@ -319,7 +343,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(FRAMESKIP_SET_NAME),
         Some(graphics_set_frameskip),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -331,7 +355,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(FIXED_ASPECT_SET_NAME),
         Some(graphics_set_fixed_aspect),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -343,7 +367,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(SMOOTH_SCALING_SET_NAME),
         Some(graphics_set_smooth_scaling),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -355,7 +379,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(INTEGER_SCALING_SET_NAME),
         Some(graphics_set_integer_scaling),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -367,7 +391,7 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(LAST_MILE_SCALING_SET_NAME),
         Some(graphics_set_last_mile_scaling),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -379,7 +403,13 @@ unsafe fn define_graphics() -> Result<()> {
         module,
         c_name(THREAD_SAFE_SET_NAME),
         Some(graphics_set_thread_safe),
-        1,
+        -1,
+    );
+    rb_define_module_function(
+        module,
+        c_name(PENDING_EVENTS_NAME),
+        Some(graphics_pending_events),
+        0,
     );
     Ok(())
 }
@@ -1032,6 +1062,27 @@ unsafe extern "C" fn graphics_set_thread_safe(
     }
     THREAD_SAFE.store(value_to_bool(*argv), Ordering::Relaxed);
     rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn graphics_pending_events(
+    _argc: c_int,
+    _argv: *const VALUE,
+    _self: VALUE,
+) -> VALUE {
+    if HANGUP_REQUESTED.load(Ordering::Relaxed) {
+        return rb_sys::Qtrue as VALUE;
+    }
+    match runtime::pending_events() {
+        Ok(pending) => bool_to_value(pending),
+        Err(err) => {
+            warn!(
+                target: "rgss",
+                error = %err,
+                "Graphics.pending_events? failed; treating as no events"
+            );
+            rb_sys::Qfalse as VALUE
+        }
+    }
 }
 
 fn current_flash() -> Option<[f32; 4]> {

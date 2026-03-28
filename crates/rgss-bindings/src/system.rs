@@ -216,7 +216,7 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         module,
         c_name(SET_WINDOW_TITLE_NAME),
         Some(system_set_window_title),
-        1,
+        -1,
     );
     rb_define_module_function(
         module,
@@ -228,7 +228,7 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         module,
         c_name(WINDOW_TITLE_SET_NAME),
         Some(system_set_window_title),
-        1,
+        -1,
     );
     rb_define_module_function(module, c_name(GAME_TITLE_NAME), Some(system_game_title), 0);
     rb_define_module_function(
@@ -280,7 +280,7 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         module,
         c_name(DESENSITIZE_NAME),
         Some(system_desensitize),
-        1,
+        -1,
     );
     rb_define_module_function(module, c_name(PLATFORM_NAME), Some(system_platform), 0);
     rb_define_module_function(module, c_name(IS_MAC_Q_NAME), Some(system_is_mac_q), 0);
@@ -317,16 +317,16 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         module,
         c_name(FILE_EXIST_Q_NAME),
         Some(system_file_exist_q),
-        1,
+        -1,
     );
     rb_define_module_function(module, c_name(LAUNCH_NAME), Some(system_launch), -1);
     rb_define_module_function(
         module,
         c_name(DEFAULT_FONT_FAMILY_SET_NAME),
         Some(system_set_default_font_family),
-        1,
+        -1,
     );
-    rb_define_module_function(module, c_name(PARSE_CSV_NAME), Some(system_parse_csv), 1);
+    rb_define_module_function(module, c_name(PARSE_CSV_NAME), Some(system_parse_csv), -1);
     rb_define_module_function(module, c_name(UNMOUNT_NAME), Some(system_unmount), -1);
     Ok(())
 }

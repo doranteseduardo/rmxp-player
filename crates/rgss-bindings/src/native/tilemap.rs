@@ -243,67 +243,67 @@ fn assign_flash_data(id: u32, width: usize, height: usize, values: &[i16]) {
 }
 unsafe fn define_tilemap_api() -> Result<()> {
     let native = native_module()?;
-    rb_define_module_function(native, c_name(CREATE_NAME), Some(tilemap_create), 1);
-    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(tilemap_dispose), 1);
+    rb_define_module_function(native, c_name(CREATE_NAME), Some(tilemap_create), -1);
+    rb_define_module_function(native, c_name(DISPOSE_NAME), Some(tilemap_dispose), -1);
     rb_define_module_function(
         native,
         c_name(SET_VIEWPORT_NAME),
         Some(tilemap_set_viewport),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_TILESET_NAME),
         Some(tilemap_set_tileset),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_AUTOTILE_NAME),
         Some(tilemap_set_autotile),
-        3,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_MAP_DATA_NAME),
         Some(tilemap_set_map_data),
-        5,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_PRIORITIES_NAME),
         Some(tilemap_set_priorities),
-        3,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_OX_NAME), Some(tilemap_set_ox), 2);
-    rb_define_module_function(native, c_name(SET_OY_NAME), Some(tilemap_set_oy), 2);
+    rb_define_module_function(native, c_name(SET_OX_NAME), Some(tilemap_set_ox), -1);
+    rb_define_module_function(native, c_name(SET_OY_NAME), Some(tilemap_set_oy), -1);
     rb_define_module_function(
         native,
         c_name(SET_VISIBLE_NAME),
         Some(tilemap_set_visible),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_OPACITY_NAME),
         Some(tilemap_set_opacity),
-        2,
+        -1,
     );
     rb_define_module_function(
         native,
         c_name(SET_BLEND_TYPE_NAME),
         Some(tilemap_set_blend_type),
-        2,
+        -1,
     );
-    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(tilemap_set_color), 5);
-    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(tilemap_set_tone), 5);
+    rb_define_module_function(native, c_name(SET_COLOR_NAME), Some(tilemap_set_color), -1);
+    rb_define_module_function(native, c_name(SET_TONE_NAME), Some(tilemap_set_tone), -1);
     rb_define_module_function(
         native,
         c_name(SET_FLASH_DATA_NAME),
         Some(tilemap_set_flash_data),
-        4,
+        -1,
     );
-    rb_define_module_function(native, c_name(UPDATE_NAME), Some(tilemap_update), 1);
+    rb_define_module_function(native, c_name(UPDATE_NAME), Some(tilemap_update), -1);
     Ok(())
 }
 

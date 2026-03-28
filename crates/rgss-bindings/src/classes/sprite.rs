@@ -174,8 +174,17 @@ unsafe extern "C" fn sprite_free(ptr: *mut c_void) {
     }
 }
 
-fn get_sprite(value: VALUE) -> &'static mut SpriteValue {
-    unsafe { get_typed_data(value, SPRITE_TYPE.as_rb_type()) }.expect("Sprite missing data")
+fn get_sprite(value: VALUE) -> Option<&'static mut SpriteValue> {
+    unsafe { get_typed_data(value, SPRITE_TYPE.as_rb_type()) }
+}
+
+macro_rules! sprite_or_nil {
+    ($val:expr) => {
+        match get_sprite($val) {
+            Some(s) => s,
+            None => return rb_sys::Qnil as VALUE,
+        }
+    };
 }
 
 unsafe extern "C" fn sprite_initialize(
@@ -187,7 +196,7 @@ unsafe extern "C" fn sprite_initialize(
     let viewport_value = args.get(0).copied().unwrap_or(rb_sys::Qnil as VALUE);
     let viewport_handle = viewport_handle(viewport_value);
     let handle = native::sprite::create(viewport_handle);
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     sprite.handle = handle;
     sprite.disposed = false;
     sprite.viewport = viewport_value;
@@ -214,7 +223,7 @@ unsafe extern "C" fn sprite_initialize(
 }
 
 unsafe extern "C" fn sprite_dispose(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     if !sprite.disposed && sprite.handle != 0 {
         native::sprite::dispose(sprite.handle);
         sprite.disposed = true;
@@ -227,13 +236,16 @@ unsafe extern "C" fn sprite_disposed_q(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    bool_to_value(get_sprite(self_value).disposed)
+    match get_sprite(self_value) { Some(s) => bool_to_value(s.disposed), None => rb_sys::Qfalse as VALUE }
 }
 
 macro_rules! sprite_float_getter {
     ($name:ident, $field:ident) => {
         unsafe extern "C" fn $name(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-            float_to_value(get_sprite(self_value).$field as f64)
+            match get_sprite(self_value) {
+                Some(s) => float_to_value(s.$field as f64),
+                None => rb_sys::Qnil as VALUE,
+            }
         }
     };
 }
@@ -241,7 +253,10 @@ macro_rules! sprite_float_getter {
 macro_rules! sprite_int_getter {
     ($name:ident, $field:ident) => {
         unsafe extern "C" fn $name(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-            int_to_value(get_sprite(self_value).$field as i64)
+            match get_sprite(self_value) {
+                Some(s) => int_to_value(s.$field as i64),
+                None => rb_sys::Qnil as VALUE,
+            }
         }
     };
 }
@@ -249,7 +264,10 @@ macro_rules! sprite_int_getter {
 macro_rules! sprite_bool_getter {
     ($name:ident, $field:ident) => {
         unsafe extern "C" fn $name(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-            bool_to_value(get_sprite(self_value).$field)
+            match get_sprite(self_value) {
+                Some(s) => bool_to_value(s.$field),
+                None => rb_sys::Qfalse as VALUE,
+            }
         }
     };
 }
@@ -261,7 +279,7 @@ macro_rules! sprite_float_setter {
                 return rb_sys::Qnil as VALUE;
             }
             let value = value_to_f32(*argv);
-            let sprite = get_sprite(self_value);
+            let sprite = sprite_or_nil!(self_value);
             sprite.$field = value;
             native::sprite::$setter(sprite.handle, value);
             *argv
@@ -276,7 +294,7 @@ macro_rules! sprite_int_setter {
                 return rb_sys::Qnil as VALUE;
             }
             let value = value_to_i32(*argv);
-            let sprite = get_sprite(self_value);
+            let sprite = sprite_or_nil!(self_value);
             sprite.$field = value;
             native::sprite::$setter(sprite.handle, value);
             *argv
@@ -291,7 +309,7 @@ macro_rules! sprite_bool_setter {
                 return rb_sys::Qnil as VALUE;
             }
             let value = value_to_bool(*argv);
-            let sprite = get_sprite(self_value);
+            let sprite = sprite_or_nil!(self_value);
             sprite.$field = value;
             native::sprite::$setter(sprite.handle, value);
             *argv
@@ -352,7 +370,7 @@ unsafe extern "C" fn sprite_get_viewport(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    get_sprite(self_value).viewport
+    match get_sprite(self_value) { Some(s) => s.viewport, None => rb_sys::Qnil as VALUE }
 }
 
 unsafe extern "C" fn sprite_set_viewport(
@@ -369,7 +387,7 @@ unsafe extern "C" fn sprite_set_viewport(
         return rb_sys::Qnil as VALUE;
     }
     let handle = viewport_handle(value);
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     sprite.viewport = value;
     native::sprite::set_viewport(sprite.handle, handle);
     value
@@ -380,7 +398,7 @@ unsafe extern "C" fn sprite_get_bitmap(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    get_sprite(self_value).bitmap
+    match get_sprite(self_value) { Some(s) => s.bitmap, None => rb_sys::Qnil as VALUE }
 }
 
 unsafe extern "C" fn sprite_set_bitmap(
@@ -400,7 +418,7 @@ unsafe extern "C" fn sprite_set_bitmap(
         warn!(target: "rgss", "Assigned non-Bitmap to Sprite#bitmap");
         None
     };
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     sprite.bitmap = if handle.is_some() {
         value
     } else {
@@ -415,7 +433,7 @@ unsafe extern "C" fn sprite_get_src_rect(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     if sprite.src_rect == rb_sys::Qnil as VALUE {
         sprite.src_rect = rect::new_rect(0, 0, 0, 0);
     }
@@ -431,7 +449,7 @@ unsafe extern "C" fn sprite_set_src_rect(
         return rb_sys::Qnil as VALUE;
     }
     if let Some(data) = rect::rect_data(*argv) {
-        let sprite = get_sprite(self_value);
+        let sprite = sprite_or_nil!(self_value);
         sprite.src_rect = rect::new_rect(data.x, data.y, data.width, data.height);
         native::sprite::set_src_rect(sprite.handle, data);
         *argv
@@ -445,7 +463,7 @@ unsafe extern "C" fn sprite_get_color(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     if sprite.color == rb_sys::Qnil as VALUE {
         sprite.color = new_color(0.0, 0.0, 0.0, 0.0);
     }
@@ -464,7 +482,7 @@ unsafe extern "C" fn sprite_set_color(
     if !is_color(value) {
         return rb_sys::Qnil as VALUE;
     }
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     let color = clone_color(value);
     sprite.color = color;
     native::sprite::set_color(sprite.handle, get_color_data(color));
@@ -476,7 +494,7 @@ unsafe extern "C" fn sprite_get_tone(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     if sprite.tone == rb_sys::Qnil as VALUE {
         sprite.tone = new_tone(0.0, 0.0, 0.0, 0.0);
     }
@@ -491,7 +509,7 @@ unsafe extern "C" fn sprite_set_tone(_argc: c_int, argv: *const VALUE, self_valu
     if !is_tone(value) {
         return rb_sys::Qnil as VALUE;
     }
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     let tone = clone_tone(value);
     sprite.tone = tone;
     native::sprite::set_tone(sprite.handle, tone_data(tone));
@@ -503,7 +521,7 @@ unsafe extern "C" fn sprite_flash(argc: c_int, argv: *const VALUE, self_value: V
     if args.is_empty() {
         return rb_sys::Qnil as VALUE;
     }
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     if sprite.disposed {
         return rb_sys::Qnil as VALUE;
     }
@@ -529,7 +547,7 @@ unsafe extern "C" fn sprite_flash(argc: c_int, argv: *const VALUE, self_value: V
 }
 
 unsafe extern "C" fn sprite_update(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let sprite = get_sprite(self_value);
+    let sprite = sprite_or_nil!(self_value);
     if sprite.disposed {
         return rb_sys::Qnil as VALUE;
     }
@@ -542,7 +560,7 @@ unsafe extern "C" fn sprite_native_id(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    int_to_value(get_sprite(self_value).handle as i64)
+    match get_sprite(self_value) { Some(s) => int_to_value(s.handle as i64), None => rb_sys::Qnil as VALUE }
 }
 
 fn apply_all(sprite: &SpriteValue) {
@@ -569,7 +587,7 @@ fn apply_all(sprite: &SpriteValue) {
 }
 
 fn sprite_dimensions(value: VALUE) -> (i32, i32) {
-    let sprite = get_sprite(value);
+    let sprite = match get_sprite(value) { Some(s) => s, None => return (0, 0) };
     if sprite.bitmap != rb_sys::Qnil as VALUE {
         if let Some(handle) = bitmap_handle(sprite.bitmap) {
             if let Some((width, height)) = native::bitmap::dimensions(handle) {

@@ -1,88 +1,94 @@
 # RMXP Native Player
 
-Rust-based reimplementation of the RPG Maker XP runtime that preserves the
-original RGSS entry points (Ruby scripts, Graphics/Bitmap/etc.) while replacing
-the underlying renderer, audio stack, and platform glue with modern multiplatform
-crates. The long-term goal is 1:1 functional parity with mkxp-z across desktop
-and mobile targets.
+A Rust reimplementation of the RPG Maker XP runtime. Embeds MRI Ruby 3.2 via
+`rb-sys`, exposes the full RGSS 1 API surface as native typed-data classes and
+module functions, and drives rendering/audio with modern Rust crates — no SDL,
+no original DLLs, no Wine.
+
+**Current status:** Pokémon Essentials 21.1 boots to the splash screen with all
+402 scripts loaded and rxdata files deserialised. Vanilla RMXP projects run
+their full script chain without modification.
 
 ---
 
-## High-Level Components
+## Architecture
 
-| Layer | Purpose |
-|-------|---------|
+| Crate | Role |
+|-------|------|
+| `apps/desktop-runner` | macOS/Windows/Linux binary: wires all crates, opens a winit window, runs the event loop. |
 | `engine-core` | Boot flow, project discovery, fixed-step scheduler, platform lifecycle hooks. |
-| `rgss-bindings` | Embeds Ruby MRI 3.2 via `rb-sys`, exposes native RGSS classes, evaluates `Scripts.rxdata`. |
-| `render` | `winit + pixels (wgpu)` renderer for tilemaps, sprites, planes, windows, and screen effects. |
-| `audio` | Rodio/CPAL plumbing for future RGSS `Audio.*` playback (channels, fades, loop points). |
+| `rgss-bindings` | Embeds Ruby MRI 3.2; native RGSS classes; preload chain; `Scripts.rxdata` evaluation. |
+| `render` | wgpu/Metal renderer: tilemaps, sprites, planes, windows, screen effects. |
+| `audio` | Rodio/CPAL audio — BGM/BGS/ME/SE playback, fades, memorize/restore. |
 | `rmxp-data` | Marshal 4.8 reader and typed RMXP structs (`System`, `MapInfos`, maps, tilesets). |
-| `platform` | Config/save directories, logging (`tracing`), CLI/env helpers. |
-| `apps/desktop-runner` | macOS/Windows/Linux binary that wires everything together. Mobile shells are staged next. |
+| `platform` | Config/save directories, `tracing` logging, CLI/env helpers. |
 
 ---
 
-## Current Capabilities
+## What Works
 
-- **Workspace Foundations** – Cargo workspace with dedicated crates per subsystem,
-  shared lint/format tooling, and a desktop runner binary that boots straight
-  into a winit event loop.
-- **Project Loading** – `rmxp-data` parses `Data/System.rxdata`, `MapInfos.rxdata`,
-  tilesets, maps, and tileset metadata from any RMXP project (set via
-  `RMXP_GAME_PATH`). `RMXP_START_MAP` overrides the starting map for testing.
-- **Renderer** – Tile scenes render via wgpu/Metal with pixel-perfect 640×480
-  output, autotile animation, and layer priorities. Viewports, sprites, planes,
-  and windows are mirrored from Ruby handle stores when available.
-- **Ruby Embedding** – MRI 3.2 boots in-process, evaluates real `Scripts.rxdata`
-  sections, and bridges to native handles (System/Graphics/Bitmap/etc.).
-- **Graphics Built-ins** – All RGSS built-in classes now run as native typed
-  data. `Bitmap#hue_change`, `Bitmap#stretch_blt`, `Bitmap#draw_text`, and
-  `Sprite#flash` all drive the renderer directly, so scripts no longer depend on
-  Ruby fallbacks for visual effects. Screen-level `Graphics.blur`/`sharpen`
-  now run through the renderer’s CPU post-process pipeline (or directly on the
-  frozen frame), matching mkxp-z transitions.
-- **Flash/Window Parity** – `Tilemap#flash_data` animates with the same 32-step
-  alpha loop and additive blend that mkxp-z uses, and window cursor/content
-  rectangles honor `ox/oy` offsets with full tone/color tinting, so Essentials’
-  UI highlights line up exactly.
-- **Audio Hooks** – The `Audio.bgm/bgs/me/se` APIs (including fade and
-  memorize/restore behavior) now live in Rust and forward into pluggable hooks,
-  so integrating a real rodio backend no longer requires Ruby shims.
-- **Lifecycle Hooks** – Window close/destroy events trigger the RGSS `Hangup`
-  exception instead of aborting the process, giving scripts a chance to intercept
-  shutdown just like in mkxp-z.
-- **System Utilities** – Platform detection (`System.platform`, `System.is_*?`),
-  CPU/memory stats, CSV parsing, launcher helpers, and file probes are wired up,
-  so scripts that rely on mkxp-z’s extended `System` module continue to run.
-- **Input Parity** – `Input.release?`, `Input.count`, `Input.time?`, mouse
-  coordinates, scroll deltas, text input, clipboard access, and the controller
-  namespace are all available, feeding the same handle store the renderer sees
-  instead of being patched in Ruby.
-- **Diagnostics** – `tracing` logs project resolution, data parsing, renderer
-  state, and Ruby evaluation status with `RMXP_LOG=debug`.
+### Boot & Scripting
+- Loads any RMXP project from `RMXP_GAME_PATH`
+- Evaluates all `Scripts.rxdata` sections inside embedded MRI 3.2
+- Full preload chain runs before user scripts: `primitives.rb` → `classic.rb` → `module_rpg1.rb` → `mkxp_wrap.rb` → `win32.rb`
+- `$RGSS_SCRIPTS` global populated with `[id, name, ""]` tuples
+- `rgss_main`/`rgss_stop` handled natively via Rust-driven Fiber loop
+- `raise Reset` / F12 re-evaluates the entire script list in place
+- `Hangup` exception raised on window close — scripts can intercept shutdown
+
+### Data I/O
+- `load_data` / `save_data` use `RGSS::Native.marshal_load` — a Rust function
+  that reads the file and calls `rb_marshal_load` directly, bypassing any
+  Ruby-level `Marshal.load` method corruption caused by protection scripts
+- All RGSS value classes have native `_dump`/`_load` for Marshal round-trips:
+  `Table` (mkxp-z binary format), `Color`/`Tone`/`Rect` (4×f64 LE, 32 bytes)
+- `data_exist?`, `save_data`, and project-relative path resolution work correctly
+
+### Graphics
+- 640×480 (or resized) pixel-perfect output via wgpu/Metal
+- Tilemap: map data, autotile animation, layer priorities, ox/oy scroll, tone/color tinting, flash
+- Sprites: x/y/z/zoom/angle/mirror/opacity/bush_depth/blend_type, tone/color overlay, flash
+- Viewports: rect clipping, ox/oy, tone/color, z-ordering
+- Planes: bitmap tiling, ox/oy scroll, zoom, opacity, tone/color
+- Windows: windowskin, background, contents, cursor rect, ox/oy, tone/color, openness, pause cursor
+- `Graphics.freeze` / `Graphics.transition` / `Graphics.snap_to_bitmap`
+- `Graphics.blur`, `Graphics.sharpen`, screen tone/brightness/flash
+- `Graphics.frame_rate=` throttles the winit loop to the requested FPS
+- `Bitmap`: `blt`, `stretch_blt`, `fill_rect`, `gradient_fill_rect`, `clear`, `get_pixel`, `set_pixel`, `draw_text` (built-in 8×8 font), `hue_change`
+
+### Audio
+- BGM / BGS / ME / SE: play, stop, fade via Rodio
+- ME auto-resumes the interrupted BGM when playback ends
+- `Audio.bgm_memorize` / `Audio.bgm_restore` hook points
+
+### Input
+- Keyboard: all RGSS buttons plus arrows, WASD, F5–F9, modifier keys
+- `press?` / `trigger?` / `repeat?` / `release?` / `count` / `time?` / `dir4` / `dir8`
+- Mouse: position, scroll, all five buttons
+- `Input.raw_key_states` — live 256-element bool array (SDL/USB-HID scancodes)
+- Clipboard and text input events
+- Controller namespace returns safe defaults (no crash)
+
+### System / Compatibility
+- `System.platform`, CPU/memory stats, CSV parsing, file probes, launcher helpers
+- `Win32API` shim covers `GetKeyState`, `GetAsyncKeyState`, `GetKeyboardState`, `ShowCursor`, `GetCursorPos`, `GetClientRect`, `ScreenToClient`, `FindWindowA`, `Keybd_event`
+- Ruby 1.x shims: `Hash#index`, `Object#id`/`type`, `TRUE`/`FALSE`/`NIL` constants
+- Full `RPG` module (RGSS 1): `RPG::Cache`, `RPG::Sprite`, `RPG::Map`, `RPG::Tileset`, `RPG::Animation`, `RPG::CommonEvent`, etc.
+- `MKXP.*` compatibility aliases
 
 ---
 
-## Active Work & Known Gaps
+## Known Gaps
 
-1. **RGSS Built-ins 1:1** – Finish migrating the remaining value/resource
-   classes to native handles, remove the stop-gap Ruby implementations, and
-   audit method-by-method parity (tone ranges, window cursors, tilemap
-   priorities, disposed? semantics, blur/sharpen, etc.).
-2. **System/Input Glue** – Essentials still expects a few more `System.*`
-   helpers plus complete input/device mappings. These APIs need to match mkxp-z
-   before most projects can boot.
-3. **Scene Loop & Interpreter** – Game_Map/Game_Player/Game_Interpreter wiring
-   still needs to hand control to Ruby so player movement, events, and menus run
-   end-to-end.
-4. **Audio** – Rodio/CPAL streams initialize, but actual BGM/BGS/ME/SE playback,
-   fades, and MIDI are pending.
-5. **Persistence & Mobile Shells** – Save/config storage plus Swift/Kotlin
-   launchers for iOS and Android remain TODO.
-
-Until items (1)–(3) land, complex projects such as Pokémon Essentials will keep
-tripping over missing constants/methods even though rendering already displays
-maps/tilesets correctly.
+| Item | Notes |
+|------|-------|
+| `Font` default propagation | `Font.default_name/size/bold/italic` exist but `Bitmap#draw_text` always uses the built-in 8×8 raster font — no TTF rendering yet. |
+| Window open/close tweening | `openness` is applied instantly; should ease over frames. |
+| MIDI playback | Most games use OGG/WAV; `.mid` BGM tracks need `rustysynth` integration. |
+| Save-slot abstraction | `save_data`/`load_data` work for `.rxdata` files; no slot-directory or document-picker yet. |
+| Mobile shells | iOS/Android launchers staged; blocked on desktop stability. |
+| Controller input | Namespace stubs present; no real gamepad events yet. |
+| `transition` curve | Not verified against mkxp-z's exact easing table. |
 
 ---
 
@@ -91,86 +97,63 @@ maps/tilesets correctly.
 | Tool | Notes |
 |------|-------|
 | Rust 1.75+ | Install via [rustup](https://rustup.rs/). |
-| Ruby 3.2 (MRI) | Required by `rb-sys`. Install via rvm/rbenv/Homebrew and expose via env vars. |
-| Ruby dev headers/libs | Ensure `libruby.3.2` and headers are discoverable (e.g. `/opt/homebrew/opt/ruby@3.2`). |
-| Platform SDKs | Metal (macOS/iOS), Vulkan/DX (Windows/Linux), Android NDK for future mobile builds. |
-
-Environment setup example:
+| Ruby 3.2 (MRI) | Required by `rb-sys`. Install via rvm/rbenv/Homebrew. |
+| Ruby dev headers | Ensure `libruby.3.2` and headers are discoverable. |
+| Platform SDKs | Metal (macOS), Vulkan/DX12 (Windows/Linux). |
 
 ```bash
 export RB_SYS_RUBY_VERSION=3.2
-export RUBY=$HOME/.rvm/rubies/ruby-3.2.0/bin/ruby  # adapt to your install
+export RUBY=$HOME/.rvm/rubies/ruby-3.2.0/bin/ruby   # adapt to your install
 ```
 
-Verify `ruby -v` and `pkg-config --libs ruby-3.2` both succeed before building.
+Verify both succeed before building:
+```bash
+ruby -v
+pkg-config --libs ruby-3.2
+```
 
 ---
 
-## Building & Running (Desktop)
+## Building & Running
 
 ```bash
-git clone https://github.com/your-org/rmxp-native-player.git
+git clone <repo>
 cd rmxp-native-player
 
 export RB_SYS_RUBY_VERSION=3.2
 export RUBY=$HOME/.rvm/rubies/ruby-3.2.0/bin/ruby
-export RMXP_GAME_PATH=/absolute/path/to/project   # must contain Data/, Graphics/, Audio/
-# optional map override
-export RMXP_START_MAP=2
+export RMXP_GAME_PATH=/absolute/path/to/project   # must contain Data/, Graphics/
 
 cargo run -p desktop-runner
 ```
 
-Environment variables:
+To run Pokémon Essentials:
+```bash
+export RMXP_GAME_PATH=/path/to/essentials-template
+cargo run -p desktop-runner
+```
+
+### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `RMXP_GAME_PATH` | Required. RMXP project root (expects `Data/System.rxdata`). |
+| `RMXP_GAME_PATH` | **Required.** RMXP project root (expects `Data/System.rxdata`). |
 | `RMXP_START_MAP` | Optional override for the starting map ID. |
-| `RMXP_LOG` | Tracing filter (e.g. `RMXP_LOG=debug`). |
-
-The desktop runner opens a 640×480 window, loads the configured project, and
-boots Ruby. When Ruby cannot drive a Scene yet, the native tile scene remains on
-screen to verify assets.
+| `RMXP_LOG` | Tracing filter, e.g. `debug` or `trace`. |
+| `RUST_BACKTRACE` | Set to `1` for Rust panic backtraces. |
 
 ---
 
-## Development Tips
+## Development
 
 | Task | Command |
 |------|---------|
-| Format everything | `cargo fmt` |
-| Clippy (workspace) | `cargo clippy --all-targets --all-features` |
-| Desktop smoke test | `RMXP_GAME_PATH=… cargo run -p desktop-runner` |
-| RGSS bindings tests | `cargo test -p rgss-bindings --lib` |
-| Faster iteration | `cargo check` |
+| Format | `cargo fmt` |
+| Lint | `cargo clippy --all-targets --all-features` |
+| Smoke test | `RMXP_GAME_PATH=… cargo run -p desktop-runner` |
+| Bindings tests | `cargo test -p rgss-bindings --lib` |
+| Quick check | `cargo check` |
 
-Additional notes:
-
-- Use `RMXP_START_MAP=<id>` to jump directly to interesting maps while debugging.
-- `RMXP_LOG=trace` prints detailed Marshal parsing and RGSS binding events.
-- `Graphics.snap_to_bitmap` already captures the backbuffer, enabling vanilla
-  screenshot scripts during testing.
-
----
-
-## RGSS Parity Roadmap
-
-1. **Static Data Classes** – Port `Color`, `Tone`, `Rect`, `Table`, and `Font`
-   to the new `StaticDataType` helpers and delete the Ruby fallback code.
-2. **Resource Classes** – Rebuild `Bitmap`, `Viewport`, `Sprite`, `Plane`,
-   `Window`, and `Tilemap` entirely in Rust handle tables, mirroring mkxp-z’s
-   lifecycle semantics (disposed?, GC hooks, etc.).
-3. **Globals & Input** – Finish `System.*` helpers, Input constants, and Hangup
-   integration required by Pokémon Essentials and other projects.
-4. **Behavior Audit + Tests** – Method-by-method comparisons against mkxp-z
-   (blur/sharpen, window cursors, tone clamps, tilemap priorities) plus snapshot
-   tests to prevent regressions.
-5. **Audio / Interpreter / Persistence** – Once RGSS surfaces are 1:1, move on
-   to Audio playback, scene/interpreter flow, save/config handling, and mobile
-   shells.
-6. **Documentation Refresh** – Keep this README and `PROGRESS.md` tracking the
-   parity matrix so contributors know exactly what remains.
-
-Contributions are welcome—please note your platform, Ruby toolchain, and sample
-project when filing issues/PRs so we can reproduce behavior quickly.
+- `RMXP_START_MAP=<id>` jumps directly to a specific map for renderer testing.
+- `RMXP_LOG=trace` prints Marshal parsing, RGSS binding events, and frame timing.
+- See `docs/rgss-parity-tracker.md` for a method-by-method coverage matrix.
