@@ -120,8 +120,8 @@ unsafe extern "C" fn bitmap_free(ptr: *mut c_void) {
     }
 }
 
-fn get_bitmap(value: VALUE) -> &'static mut BitmapValue {
-    unsafe { get_typed_data(value, BITMAP_TYPE.as_rb_type()) }.expect("Bitmap missing native data")
+fn get_bitmap(value: VALUE) -> Option<&'static mut BitmapValue> {
+    unsafe { get_typed_data(value, BITMAP_TYPE.as_rb_type()) }
 }
 
 fn ensure_font_value(data: &mut BitmapValue) {
@@ -151,7 +151,9 @@ unsafe extern "C" fn bitmap_initialize(
     } else {
         slice::from_raw_parts(argv, argc as usize)
     };
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return self_value;
+    };
     if data.handle != 0 && !data.disposed {
         native::bitmap::dispose(data.handle);
     }
@@ -186,7 +188,9 @@ unsafe extern "C" fn bitmap_initialize(
 }
 
 unsafe extern "C" fn bitmap_dispose(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
     if !data.disposed && data.handle != 0 {
         native::bitmap::dispose(data.handle);
         data.disposed = true;
@@ -199,12 +203,16 @@ unsafe extern "C" fn bitmap_disposed_q(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qtrue as VALUE;
+    };
     bool_to_value(data.disposed || native::bitmap::is_disposed(data.handle))
 }
 
 unsafe extern "C" fn bitmap_width(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return int_to_value(0);
+    };
     let width = native::bitmap::dimensions(data.handle)
         .map(|(w, _)| w)
         .unwrap_or(0);
@@ -212,7 +220,9 @@ unsafe extern "C" fn bitmap_width(_argc: c_int, _argv: *const VALUE, self_value:
 }
 
 unsafe extern "C" fn bitmap_height(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return int_to_value(0);
+    };
     let height = native::bitmap::dimensions(data.handle)
         .map(|(_, h)| h)
         .unwrap_or(0);
@@ -236,7 +246,9 @@ unsafe extern "C" fn bitmap_hue_change(
         return rb_sys::Qnil as VALUE;
     }
     let hue = value_to_i32(*argv);
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
     if data.disposed || data.handle == 0 {
         return rb_sys::Qnil as VALUE;
     }
@@ -245,7 +257,9 @@ unsafe extern "C" fn bitmap_hue_change(
 }
 
 unsafe extern "C" fn bitmap_clear(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
     native::bitmap::clear(data.handle);
     rb_sys::Qnil as VALUE
 }
@@ -253,8 +267,10 @@ unsafe extern "C" fn bitmap_clear(_argc: c_int, _argv: *const VALUE, self_value:
 unsafe extern "C" fn bitmap_fill_rect(argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
     let args = slice_from(argc, argv);
     if let Some((rect, color)) = normalize_rect_color(&args) {
-        let color = ensure_color(color);
-        native::bitmap::fill_rect(get_bitmap(self_value).handle, rect, color);
+        if let Some(data) = get_bitmap(self_value) {
+            let color = ensure_color(color);
+            native::bitmap::fill_rect(data.handle, rect, color);
+        }
     }
     rb_sys::Qnil as VALUE
 }
@@ -266,15 +282,11 @@ unsafe extern "C" fn bitmap_gradient_fill_rect(
 ) -> VALUE {
     let args = slice_from(argc, argv);
     if let Some((rect, c1, c2, vertical)) = normalize_gradient_args(&args) {
-        let color1 = ensure_color(c1);
-        let color2 = ensure_color(c2);
-        native::bitmap::gradient_fill_rect(
-            get_bitmap(self_value).handle,
-            rect,
-            color1,
-            color2,
-            vertical,
-        );
+        if let Some(data) = get_bitmap(self_value) {
+            let color1 = ensure_color(c1);
+            let color2 = ensure_color(c2);
+            native::bitmap::gradient_fill_rect(data.handle, rect, color1, color2, vertical);
+        }
     }
     rb_sys::Qnil as VALUE
 }
@@ -290,17 +302,19 @@ unsafe extern "C" fn bitmap_blt(argc: c_int, argv: *const VALUE, self_value: VAL
     let src_rect_value = args.get(3).copied();
     let opacity = args.get(4).map(|v| value_to_i32(*v)).unwrap_or(255);
     if let Some(src) = get_typed_data::<BitmapValue>(src_bitmap, BITMAP_TYPE.as_rb_type()) {
-        let rect = src_rect_value
-            .and_then(rect::rect_data)
-            .unwrap_or_else(|| full_rect(src.handle));
-        native::bitmap::blt(
-            get_bitmap(self_value).handle,
-            dest_x,
-            dest_y,
-            src.handle,
-            rect,
-            opacity.clamp(0, 255) as u8,
-        );
+        if let Some(dest) = get_bitmap(self_value) {
+            let rect = src_rect_value
+                .and_then(rect::rect_data)
+                .unwrap_or_else(|| full_rect(src.handle));
+            native::bitmap::blt(
+                dest.handle,
+                dest_x,
+                dest_y,
+                src.handle,
+                rect,
+                opacity.clamp(0, 255) as u8,
+            );
+        }
     }
     rb_sys::Qnil as VALUE
 }
@@ -317,14 +331,10 @@ unsafe extern "C" fn bitmap_stretch_blt(
     let (dest_rect, src_bitmap, src_rect_value, opacity) = normalize_stretch_args(&args);
     if let Some(src_value) = src_bitmap {
         if let Some(src) = get_typed_data::<BitmapValue>(src_value, BITMAP_TYPE.as_rb_type()) {
-            let src_rect = src_rect_value.unwrap_or_else(|| full_rect(src.handle));
-            native::bitmap::stretch_blt(
-                get_bitmap(self_value).handle,
-                dest_rect,
-                src.handle,
-                src_rect,
-                opacity,
-            );
+            if let Some(dest) = get_bitmap(self_value) {
+                let src_rect = src_rect_value.unwrap_or_else(|| full_rect(src.handle));
+                native::bitmap::stretch_blt(dest.handle, dest_rect, src.handle, src_rect, opacity);
+            }
         }
     }
     rb_sys::Qnil as VALUE
@@ -341,7 +351,10 @@ unsafe extern "C" fn bitmap_get_pixel(
     let args = slice::from_raw_parts(argv, 2);
     let x = value_to_i32(args[0]);
     let y = value_to_i32(args[1]);
-    if let Some(color) = native::bitmap::get_pixel(get_bitmap(self_value).handle, x, y) {
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
+    if let Some(color) = native::bitmap::get_pixel(data.handle, x, y) {
         return new_color(color.red, color.green, color.blue, color.alpha);
     }
     rb_sys::Qnil as VALUE
@@ -355,7 +368,10 @@ unsafe extern "C" fn bitmap_set_pixel(argc: c_int, argv: *const VALUE, self_valu
     let x = value_to_i32(args[0]);
     let y = value_to_i32(args[1]);
     let color = ensure_color(args[2]);
-    native::bitmap::set_pixel(get_bitmap(self_value).handle, x, y, color);
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
+    native::bitmap::set_pixel(data.handle, x, y, color);
     rb_sys::Qnil as VALUE
 }
 
@@ -368,7 +384,10 @@ unsafe extern "C" fn bitmap_text_size(
         return rect::new_rect(0, 0, 0, 0);
     }
     let text = value_to_string(*argv);
-    let font_info = font_info(get_bitmap(self_value));
+    let Some(data) = get_bitmap(self_value) else {
+        return rect::new_rect(0, 0, 0, 0);
+    };
+    let font_info = font_info(data);
     let (width, height) = native::bitmap::text_size(font_info.size, &text);
     rect::new_rect(0, 0, width, height)
 }
@@ -379,23 +398,23 @@ unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, self_valu
         return rb_sys::Qnil as VALUE;
     }
     let (rect, text, align) = normalize_draw_text_args(&args);
-    let info = font_info(get_bitmap(self_value));
-    native::bitmap::draw_text(
-        get_bitmap(self_value).handle,
-        rect,
-        &text,
-        align,
-        info.size,
-        info.color,
-    );
+    let Some(data) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
+    let info = font_info(data);
+    native::bitmap::draw_text(data.handle, rect, &text, align, info.size, info.color);
     rb_sys::Qnil as VALUE
 }
 
 unsafe extern "C" fn bitmap_dup(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
-    let data = get_bitmap(self_value);
+    let Some(data) = get_bitmap(self_value) else {
+        return new_instance();
+    };
     let new_bitmap = new_instance();
     if let Some(new_handle) = native::bitmap::copy_bitmap(data.handle) {
-        let target = get_bitmap(new_bitmap);
+        let Some(target) = get_bitmap(new_bitmap) else {
+            return new_bitmap;
+        };
         target.handle = new_handle;
         target.disposed = false;
         target.font = clone_font(data.font);
@@ -408,7 +427,9 @@ unsafe extern "C" fn bitmap_get_font(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    let bitmap = get_bitmap(self_value);
+    let Some(bitmap) = get_bitmap(self_value) else {
+        return new_font();
+    };
     ensure_font_value(bitmap);
     bitmap.font
 }
@@ -418,7 +439,9 @@ unsafe extern "C" fn bitmap_set_font(_argc: c_int, argv: *const VALUE, self_valu
         return rb_sys::Qnil as VALUE;
     }
     let value = *argv;
-    let bitmap = get_bitmap(self_value);
+    let Some(bitmap) = get_bitmap(self_value) else {
+        return rb_sys::Qnil as VALUE;
+    };
     bitmap.font = if is_font(value) {
         font::clone_font(value)
     } else {
@@ -447,10 +470,11 @@ unsafe extern "C" fn bitmap_native_wrap(_argc: c_int, argv: *const VALUE, klass:
     let handle = rb_sys::rb_num2uint(*argv) as u32;
     unsafe {
         let value = bitmap_allocate_internal(klass);
-        let data = get_bitmap(value);
-        data.handle = handle;
-        data.disposed = false;
-        data.font = new_font();
+        if let Some(data) = get_bitmap(value) {
+            data.handle = handle;
+            data.disposed = false;
+            data.font = new_font();
+        }
         value
     }
 }

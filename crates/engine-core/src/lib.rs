@@ -74,6 +74,11 @@ pub fn run(config: AppConfig) -> Result<()> {
     let project = match GameProject::from_env() {
         Ok(project) => {
             set_project_root(project.root());
+            // Change the process working directory to the game root so that
+            // Ruby scripts can use relative paths (e.g. "Data/Map001.rxdata").
+            if let Err(err) = std::env::set_current_dir(project.root()) {
+                warn!(target: "project", error = %err, "Failed to chdir to game root");
+            }
             info!(target: "project", root = ?project.data_dir(), "Project path resolved");
             Some(project)
         }
@@ -580,29 +585,18 @@ fn engine_get_display_size() -> (u32, u32) {
 }
 
 fn engine_center_window() {
-    with_window(|window| {
-        if let Some(monitor) = window.current_monitor() {
-            let monitor_size = monitor.size();
-            let outer = window.outer_size();
-            let monitor_origin = monitor.position();
-            let pos_x = monitor_origin.x
-                + (monitor_size.width as i32 - outer.width as i32).saturating_div(2);
-            let pos_y = monitor_origin.y
-                + (monitor_size.height as i32 - outer.height as i32).saturating_div(2);
-            window.set_outer_position(PhysicalPosition::new(pos_x, pos_y));
-        }
-    });
+    // All winit monitor-enumeration paths on macOS trigger an icrate-0.0.4
+    // NSUInteger/NSInteger type-code mismatch panic.  Window centering is
+    // cosmetic; skip it until icrate is updated or we switch to a CoreGraphics
+    // path that bypasses NSScreen enumeration.
 }
 
 fn engine_set_fullscreen(enable: bool) {
     with_window(|window| {
         if enable {
-            let target_monitor = window.current_monitor().or_else(|| {
-                window
-                    .available_monitors()
-                    .next()
-                    .or_else(|| Some(window.primary_monitor()).flatten())
-            });
+            // Use primary_monitor() to avoid NSScreen fast-enumeration
+            // icrate type-mismatch panic on macOS.
+            let target_monitor = window.primary_monitor();
             window.set_fullscreen(Some(Fullscreen::Borderless(target_monitor)));
         } else {
             window.set_fullscreen(None);

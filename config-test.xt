@@ -1,0 +1,2 @@
+cargo run -p desktop-runner
+export RMXP_GAME_PATH=/Users/dorantes/Desktop/rmxp/essentials-template 

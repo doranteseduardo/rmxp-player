@@ -2,10 +2,12 @@ use crate::runtime;
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use rb_sys::{rb_mKernel, rb_obj_class, VALUE};
+use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use tracing::warn;
 
 type RubyFn = unsafe extern "C" fn(c_int, *const VALUE, VALUE) -> VALUE;
+type ID = usize;
 
 extern "C" {
     fn rb_define_module_function(
@@ -17,6 +19,8 @@ extern "C" {
     fn rb_define_method(module: VALUE, name: *const c_char, func: Option<RubyFn>, argc: c_int);
     fn rb_block_given_p() -> c_int;
     fn rb_block_proc() -> VALUE;
+    fn rb_intern(name: *const c_char) -> ID;
+    fn rb_funcall(recv: VALUE, mid: ID, argc: c_int, ...) -> VALUE;
 }
 
 const RGSS_MAIN_NAME: &[u8] = b"rgss_main\0";
@@ -52,10 +56,13 @@ unsafe extern "C" fn kernel_rgss_main(_argc: c_int, _argv: *const VALUE, _self: 
         warn!(target: "rgss", "Failed to capture rgss_main block");
         return rb_sys::Qnil as VALUE;
     }
-    if let Err(err) = runtime::install_main(block) {
-        warn!(target: "rgss", error = %err, "Failed to install rgss_main block");
-    }
-    rb_sys::Qnil as VALUE
+    // Call the block directly in the current execution context.
+    // The Main script already runs inside a Fiber installed by
+    // install_main_from_source, so Graphics.update → Fiber.yield correctly
+    // suspends back to the event loop whether the game uses rgss_main { } or
+    // calls the game loop directly (PE-style mainFunction).
+    let call_id = rb_intern(CString::new("call").expect("cstr").as_ptr());
+    rb_funcall(block, call_id, 0)
 }
 
 unsafe extern "C" fn kernel_rgss_stop(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {

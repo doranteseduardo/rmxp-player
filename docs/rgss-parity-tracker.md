@@ -24,7 +24,7 @@ Legend: ✅ complete · ⚠️ partial · ❌ missing
 
 | Class | Status | Notes |
 |-------|--------|-------|
-| `Bitmap` | ⚠️ partial | `blt`, `stretch_blt`, `fill_rect`, `gradient_fill_rect`, `clear`, `get_pixel`, `set_pixel`, `draw_text`, `hue_change` all implemented. Path resolution for `Bitmap.new(filename)` needs verification against project root (gap #3). Font defaults not honoured (gap #2). |
+| `Bitmap` | ⚠️ partial | `blt`, `stretch_blt`, `fill_rect`, `gradient_fill_rect`, `clear`, `get_pixel`, `set_pixel`, `draw_text`, `hue_change` all implemented. Subclasses without native typed-data degrade gracefully (returns nil / treated as disposed) instead of panicking. Path resolution for `Bitmap.new(filename)` needs verification against project root (gap #3). Font defaults not honoured (gap #2). |
 | `Sprite` | ⚠️ partial | All properties implemented. `wave_amp`/`wave_length` not implemented (rare). Flash state implemented. `bush_depth` wired. |
 | `Viewport` | ⚠️ partial | rect/ox/oy/tone/color/z/visible all wired. Nested viewport z-ordering not tested. |
 | `Plane` | ⚠️ partial | scroll/zoom/opacity/tone/color all wired. Blend mode parity with mkxp-z not verified. |
@@ -49,7 +49,7 @@ Legend: ✅ complete · ⚠️ partial · ❌ missing
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `RGSS::Runtime` (Fiber loop) | ✅ complete | install_main, resume_main, yield_frame, active?, reset, notify_suspend/resume/low_memory. |
+| `RGSS::Runtime` (Fiber loop) | ✅ complete | install_main, install_main_from_source, resume_main, yield_frame, active?, reset, notify_suspend/resume/low_memory. Main script is always wrapped in a Fiber; `rgss_main { }` block is called directly inside the fiber. |
 | `Hangup` exception | ✅ complete | Raised on window close; matches mkxp-z lifecycle. |
 | `Reset` exception | ✅ complete | Defined in primitives.rb; detected natively in runtime.rs; triggers full script re-evaluation. |
 | Ruby classic shims | ✅ complete | `Hash#index`, `Object#id`/`type`, `TRUE`/`FALSE`/`NIL`, `BasicObject#initialize`. |
@@ -81,11 +81,12 @@ Legend: ✅ complete · ⚠️ partial · ❌ missing
 
 ## Known Gaps to Close Next
 
-Pokémon Essentials 21.1 boot chain reaches the splash screen. Remaining items:
+Pokémon Essentials 21.1 boots past the splash screen into the main game loop.
+Remaining items:
 
 1. Window open/close tweening — `openness` setter is instant; should ease over frames.
 2. MIDI playback — `rustysynth` integration for `.mid` BGM tracks.
 3. Save/load slot abstraction — no slot directory or document-picker integration.
 4. Mobile shells — iOS/Android launchers staged; blocked on desktop stability.
 5. `transition` curve — not verified against mkxp-z's exact easing.
-6. PE `BitmapWrapper#animated?` — method missing in essentials-template; PE-internal Ruby issue.
+6. `engine_center_window` — no-op on macOS due to `icrate-0.0.4` `NSScreen` enumeration panic; restore when icrate is updated.

@@ -14,6 +14,9 @@ extern "C" {
         state: *mut c_int,
     ) -> VALUE;
     fn rb_obj_is_kind_of(obj: VALUE, klass: VALUE) -> VALUE;
+    fn rb_utf8_str_new(ptr: *const c_char, len: i64) -> VALUE;
+    fn rb_gv_set(name: *const c_char, val: VALUE) -> VALUE;
+    fn rb_eval_string_protect(str: *const c_char, state: *mut c_int) -> VALUE;
 }
 
 type ID = usize;
@@ -31,7 +34,10 @@ pub enum MainResult {
 
 struct RuntimeCache {
     module: VALUE,
+    #[allow(dead_code)]
     install_id: ID,
+    #[allow(dead_code)]
+    install_from_source_id: ID,
     resume_id: ID,
     yield_id: ID,
     active_id: ID,
@@ -133,6 +139,7 @@ pub fn notify_low_memory() -> Result<()> {
     runtime_notify("notify_low_memory", |cache| cache.low_memory_id)
 }
 
+#[allow(dead_code)]
 pub fn install_main(block: VALUE) -> Result<()> {
     runtime_cache()?;
     let mut state = 0;
@@ -142,6 +149,46 @@ pub fn install_main(block: VALUE) -> Result<()> {
     if state != 0 {
         let message = unsafe { crate::current_exception_message() };
         return Err(anyhow!("Ruby exception during rgss_main: {message}"));
+    }
+    Ok(())
+}
+
+/// Wrap the Main script source string in a Ruby Fiber and store it as the
+/// main fiber.  The event loop then drives it via `resume_main()` one frame
+/// at a time.  This makes both PE-style synchronous scripts and standard
+/// `rgss_main { }` scripts work identically: `Graphics.update` calls
+/// `Fiber.yield` inside the fiber and suspends until the next frame.
+/// Wrap the Main script source string in a Ruby Fiber and store it as the
+/// main fiber.  The event loop then drives it via `resume_main()` one frame
+/// at a time.  This makes both PE-style synchronous scripts and standard
+/// `rgss_main { }` scripts work identically: `Graphics.update` calls
+/// `Fiber.yield` inside the fiber and suspends until the next frame.
+pub fn install_main_from_source(source: &str, label: &str) -> Result<()> {
+    let _cache = runtime_cache()?;
+    // Store source and label in Ruby globals so we can pass them to
+    // RGSS::Runtime.install_main_from_source without embedding potentially-large
+    // strings in an eval'd bootstrap literal.
+    unsafe {
+        let src_bytes = source.as_bytes();
+        let src_val =
+            rb_utf8_str_new(src_bytes.as_ptr() as *const c_char, src_bytes.len() as i64);
+        rb_gv_set(b"$__rgss_main_src__\0".as_ptr() as *const c_char, src_val);
+
+        let lbl_bytes = label.as_bytes();
+        let lbl_val =
+            rb_utf8_str_new(lbl_bytes.as_ptr() as *const c_char, lbl_bytes.len() as i64);
+        rb_gv_set(b"$__rgss_main_lbl__\0".as_ptr() as *const c_char, lbl_val);
+    }
+
+    let mut state: c_int = 0;
+    unsafe {
+        let bootstrap =
+            b"RGSS::Runtime.install_main_from_source($__rgss_main_src__, $__rgss_main_lbl__); $__rgss_main_src__ = $__rgss_main_lbl__ = nil\0";
+        rb_eval_string_protect(bootstrap.as_ptr() as *const c_char, &mut state);
+    }
+    if state != 0 {
+        let message = unsafe { crate::current_exception_message() };
+        return Err(anyhow!("Failed to install main script fiber: {message}"));
     }
     Ok(())
 }
@@ -196,6 +243,7 @@ unsafe extern "C" fn call_resume(arg: VALUE) -> VALUE {
     rb_funcall(arg, cache.resume_id, 0)
 }
 
+#[allow(dead_code)]
 unsafe extern "C" fn call_install(block: VALUE) -> VALUE {
     let cache = RUNTIME.get().expect("runtime cache must be initialised");
     rb_funcall(cache.module, cache.install_id, 1, block)
@@ -224,6 +272,7 @@ fn runtime_cache() -> Result<&'static RuntimeCache> {
         Ok(RuntimeCache {
             module: runtime,
             install_id: intern("install_main")?,
+            install_from_source_id: intern("install_main_from_source")?,
             resume_id: intern("resume_main")?,
             yield_id: intern("yield_frame")?,
             active_id: intern("active?")?,

@@ -142,6 +142,40 @@ all 402 PE scripts and reaches the splash screen.
   called on Sprite subclasses that bypass the native allocator return `nil`
   instead of panicking.
 
+## ✅ Post-Splash Stability Pass (2026-03-29)
+
+Fixed all blocking issues preventing PE 21.1 from advancing past the splash
+screen into gameplay. The engine now enters the main game loop.
+
+- **Fiber-based game loop** — `run_scripts()` now wraps the last (Main) script
+  section in a `Fiber` via `RGSS::Runtime.install_main_from_source`, instead of
+  evaluating it synchronously. The event loop drives the fiber one frame at a
+  time via `resume_main_loop()`. This makes both PE-style synchronous games
+  (mainFunction called directly) and standard `rgss_main { }` games work
+  identically: `Graphics.update` → `Fiber.yield` suspends back to the event
+  loop for rendering without ever blocking it. `kernel_rgss_main` updated to
+  call the block directly in the already-running fiber context (no nested fiber).
+
+- **PE clone protection bypass** — PE's protection mechanism redefines `clone`
+  on every `RPG::*` class with a stub that raises `NoMethodError`. This bypasses
+  `undef_method`/`remove_method` interception and makes `method_defined?` return
+  `true` while the method raises. Fixed by adding a one-shot `Graphics.update`
+  hook that unconditionally redefines `clone` on all `RPG::*` classes on the
+  first frame — fires after PE protection runs but before any BGM/audio code
+  that clones `RPG::AudioFile`.
+
+- **`Bitmap` subclass graceful degradation** — `get_bitmap()` now returns
+  `Option<&mut BitmapValue>` instead of panicking. All callers use
+  `let Some(data) = get_bitmap(...) else { return ... }`. `bitmap_disposed_q`
+  returns `Qtrue` (treated as disposed) when no native data is present. Matches
+  the existing pattern for `Sprite`.
+
+- **macOS `NSScreen` enumeration panic** — `engine_center_window()` and all
+  winit monitor-enumeration paths trigger an `icrate-0.0.4` `NSUInteger` vs
+  `NSInteger` type-code mismatch panic on macOS. Window centering is cosmetic;
+  `engine_center_window()` is now a no-op until `icrate` is updated or replaced
+  with a CoreGraphics path.
+
 ## 🚧 Polish (game runs, rough edges)
 
 These are the known gaps between the current state and a fully playable vanilla

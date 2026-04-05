@@ -54,6 +54,24 @@ module RGSS
         end
       end
 
+      # Called by Rust to wrap the Main script source in a Fiber driven by the
+      # event loop.  Both PE-style (mainFunction directly) and standard-style
+      # (rgss_main { block }) games benefit: Graphics.update -> Fiber.yield
+      # yields control to the event loop for rendering without ever blocking it.
+      def install_main_from_source(source, label)
+        @main_fiber = Fiber.new do
+          begin
+            # rubocop:disable Security/Eval
+            TOPLEVEL_BINDING.eval(source, "(\#{label})", 1)
+            # rubocop:enable Security/Eval
+          rescue ::SystemExit
+            # clean exit
+          ensure
+            @main_fiber = nil
+          end
+        end
+      end
+
       def resume_main
         fiber = @main_fiber
         return false unless fiber
@@ -162,20 +180,30 @@ module RGSS
 
     module ModulePatch
       def undef_method(*symbols)
-        restore = symbols.any? { |sym| sym.to_sym == :class }
+        restore_class = symbols.any? { |sym| sym.to_sym == :class }
+        restore_clone = symbols.any? { |sym| sym.to_sym == :clone }
         super
-        if restore
+        if restore_class
           RGSS::Compat.report_class_change(self, :undef_method)
           RGSS::Compat.inject_class_method(self)
+        end
+        if restore_clone
+          mod = self
+          mod.class_eval { define_method(:clone) { |*| dup } } rescue nil
         end
       end
 
       def remove_method(*symbols)
-        restore = symbols.any? { |sym| sym.to_sym == :class }
+        restore_class = symbols.any? { |sym| sym.to_sym == :class }
+        restore_clone = symbols.any? { |sym| sym.to_sym == :clone }
         super
-        if restore
+        if restore_class
           RGSS::Compat.report_class_change(self, :remove_method)
           RGSS::Compat.inject_class_method(self)
+        end
+        if restore_clone
+          mod = self
+          mod.class_eval { define_method(:clone) { |*| dup } } rescue nil
         end
       end
     end
@@ -262,8 +290,69 @@ module Kernel
 
 end
 
+# Numeric conversion safeguards.
+# Ruby 3.2 defines Float#to_f at the C level. Some PE protection mechanisms
+# have been observed to clear the Float method table, dropping inherited C
+# methods. Define a Ruby-level fallback on Numeric so it is always reachable
+# through the superclass chain even if Float's own entry disappears.
+class Numeric
+  def to_f; self + 0.0; end unless method_defined?(:to_f)
+end
+class Float
+  def to_f; self; end
+  def to_i; (self < 0 ? -(-self).floor : floor); end unless method_defined?(:to_i)
+  def to_r; Rational(self); end unless method_defined?(:to_r)
+end
+
+# mkxp-z GIF animation extension stubs for Bitmap.
+# We don't support animated GIFs — all bitmaps are static. Scripts that guard
+# on animated? will skip GIF-specific paths; the rest are safe no-ops.
+class Bitmap
+  def animated?;             false; end
+  def play;                  nil;   end
+  def stop;                  nil;   end
+  def goto_and_stop(_frame); nil;   end
+  def current_frame;         0;     end
+  def frame_count;           1;     end
+  def frame_rate;            nil;   end
+  # mkxp-z "mega texture" check (very large tilesets split into columns).
+  def mega?;                 false; end
+end
+
 module Graphics
   class << self
+    alias_method :__update_native, :update
+
+    # One-shot hook: on the first Graphics.update call the game loop is
+    # running and all PE protection scripts have already had a chance to
+    # tamper with standard methods.  Restore any that were replaced with
+    # raising stubs (PE does this instead of undef_method, so our
+    # ModulePatch cannot intercept it).
+    @_rgss_methods_restored = false
+
+    def update
+      unless @_rgss_methods_restored
+        @_rgss_methods_restored = true
+        _restore_stripped_methods
+      end
+      __update_native
+    end
+
+    private
+
+    def _restore_stripped_methods
+      return unless defined?(RPG)
+      RPG.constants.each do |const|
+        klass = RPG.const_get(const) rescue next
+        next unless klass.is_a?(Module)
+        # Unconditionally redefine :clone — PE may have replaced it with a
+        # stub that raises NoMethodError, which method_defined? reports as true.
+        klass.class_eval { define_method(:clone) { |*| dup } } rescue nil
+      end
+    end
+
+    public
+
     alias_method :__snap_to_bitmap_handle, :_snap_to_bitmap_handle
 
     def snap_to_bitmap

@@ -953,6 +953,11 @@ fn draw_window_background(
     if base_opacity == 0 {
         return;
     }
+    if skin.width() < WINDOW_BG_SRC.x + WINDOW_BG_SRC.w
+        || skin.height() < WINDOW_BG_SRC.y + WINDOW_BG_SRC.h
+    {
+        return;
+    }
     for y in 0..target.height {
         let dest_y = target.y + y as i32;
         let local_y = dest_y - inner_rect.y;
@@ -1207,6 +1212,9 @@ fn draw_windowskin_patch(
     opacity: u8,
 ) {
     if src.w == 0 || src.h == 0 || dest.width == 0 || dest.height == 0 || opacity == 0 {
+        return;
+    }
+    if skin.width() < src.x + src.w || skin.height() < src.y + src.h {
         return;
     }
     let Some(target) = dest.intersect(visible).and_then(|r| r.clamp(size)) else {
