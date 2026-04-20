@@ -182,6 +182,10 @@ fn get_window(value: VALUE) -> &'static mut WindowValue {
     unsafe { get_typed_data(value, WINDOW_TYPE.as_rb_type()) }.expect("Window missing native data")
 }
 
+fn try_get_window(value: VALUE) -> Option<&'static mut WindowValue> {
+    unsafe { get_typed_data(value, WINDOW_TYPE.as_rb_type()) }
+}
+
 unsafe extern "C" fn window_initialize(
     argc: c_int,
     argv: *const VALUE,
@@ -242,7 +246,7 @@ unsafe extern "C" fn window_disposed_q(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    bool_to_value(get_window(self_value).disposed)
+    bool_to_value(try_get_window(self_value).map(|w| w.disposed).unwrap_or(true))
 }
 
 macro_rules! window_int_getter {

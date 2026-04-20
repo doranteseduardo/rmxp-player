@@ -398,7 +398,16 @@ unsafe extern "C" fn sprite_get_bitmap(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    match get_sprite(self_value) { Some(s) => s.bitmap, None => rb_sys::Qnil as VALUE }
+    match get_sprite(self_value) {
+        Some(s) => {
+            warn!(target: "rgss", "sprite_get_bitmap: self={:#x} returning={:#x}", self_value, s.bitmap);
+            s.bitmap
+        }
+        None => {
+            warn!(target: "rgss", "sprite_get_bitmap: get_sprite returned None for self={:#x}", self_value);
+            rb_sys::Qnil as VALUE
+        }
+    }
 }
 
 unsafe extern "C" fn sprite_set_bitmap(
@@ -407,24 +416,31 @@ unsafe extern "C" fn sprite_set_bitmap(
     self_value: VALUE,
 ) -> VALUE {
     if argv.is_null() {
+        warn!(target: "rgss", "sprite_set_bitmap: argv is null");
         return rb_sys::Qnil as VALUE;
     }
     let value = *argv;
-    let handle = if value == rb_sys::Qnil as VALUE {
-        None
+    let class_name = rb_sys::rb_obj_classname(value);
+    let name = std::ffi::CStr::from_ptr(class_name).to_str().unwrap_or("?");
+    warn!(target: "rgss", "sprite_set_bitmap called: value class={} self={:#x}", name, self_value);
+    let Some(sprite) = get_sprite(self_value) else {
+        warn!(target: "rgss", "sprite_set_bitmap: get_sprite returned None for self={:#x}", self_value);
+        return value;
+    };
+    if value == rb_sys::Qnil as VALUE {
+        sprite.bitmap = rb_sys::Qnil as VALUE;
+        native::sprite::set_bitmap(sprite.handle, None);
     } else if is_bitmap(value) {
-        bitmap_handle(value)
+        let handle = bitmap_handle(value);
+        if handle.is_none() {
+            warn!(target: "rgss", "sprite_set_bitmap: Bitmap handle is None (disposed?)");
+        }
+        sprite.bitmap = value;
+        warn!(target: "rgss", "sprite_set_bitmap: stored bitmap VALUE={:#x}", value);
+        native::sprite::set_bitmap(sprite.handle, handle);
     } else {
-        warn!(target: "rgss", "Assigned non-Bitmap to Sprite#bitmap");
-        None
-    };
-    let sprite = sprite_or_nil!(self_value);
-    sprite.bitmap = if handle.is_some() {
-        value
-    } else {
-        rb_sys::Qnil as VALUE
-    };
-    native::sprite::set_bitmap(sprite.handle, handle);
+        warn!(target: "rgss", "sprite_set_bitmap: rejected non-Bitmap, class={}", name);
+    }
     value
 }
 

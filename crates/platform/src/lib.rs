@@ -59,8 +59,8 @@ pub struct EngineConfig {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            window_width: 640,
-            window_height: 480,
+            window_width: 512,
+            window_height: 384,
             title: "RMXP Native Player".to_string(),
         }
     }

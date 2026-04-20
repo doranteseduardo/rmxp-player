@@ -80,6 +80,11 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"clone\0"), bitmap_dup, 0);
         define_method(klass, cstr(b"font\0"), bitmap_get_font, 0);
         define_method(klass, cstr(b"font=\0"), bitmap_set_font, -1);
+        define_method(klass, cstr(b"animated?\0"), bitmap_animated_q, 0);
+        define_method(klass, cstr(b"play\0"), bitmap_play, -1);
+        define_method(klass, cstr(b"goto_and_stop\0"), bitmap_goto_and_stop, -1);
+        define_method(klass, cstr(b"text_offset_y\0"), bitmap_get_text_offset_y, 0);
+        define_method(klass, cstr(b"text_offset_y=\0"), bitmap_set_text_offset_y, -1);
 
         define_singleton_method(klass, cstr(b"max_size\0"), bitmap_max_size, 0);
         define_singleton_method(klass, cstr(b"max_size=\0"), bitmap_set_max_size, -1);
@@ -152,6 +157,7 @@ unsafe extern "C" fn bitmap_initialize(
         slice::from_raw_parts(argv, argc as usize)
     };
     let Some(data) = get_bitmap(self_value) else {
+        warn!(target: "rgss", "bitmap_initialize: get_bitmap returned None — typed data mismatch");
         return self_value;
     };
     if data.handle != 0 && !data.disposed {
@@ -448,6 +454,26 @@ unsafe extern "C" fn bitmap_set_font(_argc: c_int, argv: *const VALUE, self_valu
         new_font()
     };
     value
+}
+
+unsafe extern "C" fn bitmap_get_text_offset_y(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    unsafe { rb_sys::rb_ll2inum(0) }
+}
+
+unsafe extern "C" fn bitmap_set_text_offset_y(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn bitmap_animated_q(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    rb_sys::Qfalse as VALUE
+}
+
+unsafe extern "C" fn bitmap_play(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    rb_sys::Qnil as VALUE
+}
+
+unsafe extern "C" fn bitmap_goto_and_stop(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
+    rb_sys::Qnil as VALUE
 }
 
 unsafe extern "C" fn bitmap_max_size(_argc: c_int, _argv: *const VALUE, _klass: VALUE) -> VALUE {

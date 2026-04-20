@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use font8x8::legacy::BASIC_LEGACY;
 use image::{imageops::FilterType, ImageReader, Rgba, RgbaImage};
 use once_cell::sync::Lazy;
-use rb_sys::{rb_num2int, rb_num2uint, rb_uint2inum, ruby_special_consts, special_consts, VALUE};
+use rb_sys::{rb_ll2inum, rb_num2int, rb_num2uint, rb_uint2inum, VALUE};
 use std::{
     ffi::CStr,
     os::raw::{c_char, c_int},
@@ -489,15 +489,7 @@ fn clamp_dimension(value: i32) -> u32 {
 }
 
 fn int_to_value(value: i64) -> VALUE {
-    unsafe {
-        if value >= special_consts::FIXNUM_MIN as i64 && value <= special_consts::FIXNUM_MAX as i64
-        {
-            ((value << ruby_special_consts::RUBY_SPECIAL_SHIFT as i64)
-                | ruby_special_consts::RUBY_FIXNUM_FLAG as i64) as VALUE
-        } else {
-            rb_sys::rb_int2big(value as isize)
-        }
-    }
+    unsafe { rb_ll2inum(value) }
 }
 
 fn c_name(bytes: &[u8]) -> *const c_char {

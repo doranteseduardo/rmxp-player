@@ -147,6 +147,10 @@ fn get_plane(value: VALUE) -> &'static mut PlaneValue {
     unsafe { get_typed_data(value, PLANE_TYPE.as_rb_type()) }.expect("Plane missing native data")
 }
 
+fn try_get_plane(value: VALUE) -> Option<&'static mut PlaneValue> {
+    unsafe { get_typed_data(value, PLANE_TYPE.as_rb_type()) }
+}
+
 unsafe extern "C" fn plane_initialize(argc: c_int, argv: *const VALUE, self_value: VALUE) -> VALUE {
     let args = if argc <= 0 || argv.is_null() {
         &[]
@@ -191,7 +195,7 @@ unsafe extern "C" fn plane_disposed_q(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    bool_to_value(get_plane(self_value).disposed)
+    bool_to_value(try_get_plane(self_value).map(|p| p.disposed).unwrap_or(true))
 }
 
 macro_rules! plane_float_getter {

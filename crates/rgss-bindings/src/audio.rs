@@ -37,19 +37,19 @@ pub fn init() -> Result<()> {
         }
         define_method(module, b"bgm_play\0", audio_bgm_play, -1);
         define_method(module, b"bgm_stop\0", audio_bgm_stop, 0);
-        define_method(module, b"bgm_fade\0", audio_bgm_fade, 1);
+        define_method(module, b"bgm_fade\0", audio_bgm_fade, -1);
         define_method(module, b"bgm_memorize\0", audio_bgm_memorize, 0);
         define_method(module, b"bgm_restore\0", audio_bgm_restore, 0);
 
         define_method(module, b"bgs_play\0", audio_bgs_play, -1);
         define_method(module, b"bgs_stop\0", audio_bgs_stop, 0);
-        define_method(module, b"bgs_fade\0", audio_bgs_fade, 1);
+        define_method(module, b"bgs_fade\0", audio_bgs_fade, -1);
         define_method(module, b"bgs_memorize\0", audio_bgs_memorize, 0);
         define_method(module, b"bgs_restore\0", audio_bgs_restore, 0);
 
         define_method(module, b"me_play\0", audio_me_play, -1);
         define_method(module, b"me_stop\0", audio_me_stop, 0);
-        define_method(module, b"me_fade\0", audio_me_fade, 1);
+        define_method(module, b"me_fade\0", audio_me_fade, -1);
 
         define_method(module, b"se_play\0", audio_se_play, -1);
         define_method(module, b"se_stop\0", audio_se_stop, 0);

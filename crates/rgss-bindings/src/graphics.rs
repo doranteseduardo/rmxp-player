@@ -4,8 +4,7 @@ use image::RgbaImage;
 use once_cell::sync::{Lazy, OnceCell};
 use rb_sys::{
     rb_ary_new, rb_ary_push, rb_cObject, rb_const_get, rb_define_module, rb_eRuntimeError,
-    rb_float_new, rb_int2big, rb_intern, rb_num2long, rb_raise, ruby_special_consts,
-    special_consts, VALUE,
+    rb_float_new, rb_intern, rb_ll2inum, rb_num2dbl, rb_num2long, rb_raise, VALUE,
 };
 use std::{
     ffi::{CStr, CString},
@@ -21,8 +20,8 @@ use tracing::warn;
 static GRAPHICS_MODULE: OnceCell<()> = OnceCell::new();
 static FRAME_COUNT: AtomicI64 = AtomicI64::new(0);
 static FRAME_RATE: AtomicU32 = AtomicU32::new(60);
-static SCREEN_WIDTH: AtomicU32 = AtomicU32::new(640);
-static SCREEN_HEIGHT: AtomicU32 = AtomicU32::new(480);
+static SCREEN_WIDTH: AtomicU32 = AtomicU32::new(512);
+static SCREEN_HEIGHT: AtomicU32 = AtomicU32::new(384);
 static SCREEN_FROZEN: AtomicBool = AtomicBool::new(false);
 static LAST_FRAME: Lazy<RwLock<Option<Arc<RgbaImage>>>> = Lazy::new(|| RwLock::new(None));
 static FROZEN_FRAME: Lazy<RwLock<Option<Arc<RgbaImage>>>> = Lazy::new(|| RwLock::new(None));
@@ -551,7 +550,10 @@ unsafe extern "C" fn graphics_resize_screen(
     if width > 0 && height > 0 {
         SCREEN_WIDTH.store(width as u32, Ordering::Relaxed);
         SCREEN_HEIGHT.store(height as u32, Ordering::Relaxed);
-        system::resize_window(width as u32, height as u32);
+        let scale = f32::from_bits(SCALE_FACTOR.load(Ordering::Relaxed));
+        let win_w = ((width as f32 * scale).round() as u32).max(1);
+        let win_h = ((height as f32 * scale).round() as u32).max(1);
+        system::resize_window(win_w, win_h);
     }
     rb_sys::Qnil as VALUE
 }
@@ -579,15 +581,7 @@ unsafe extern "C" fn graphics_sharpen(_argc: c_int, _argv: *const VALUE, _self: 
 }
 
 fn int_to_value(value: i64) -> VALUE {
-    unsafe {
-        if value >= special_consts::FIXNUM_MIN as i64 && value <= special_consts::FIXNUM_MAX as i64
-        {
-            ((value << ruby_special_consts::RUBY_SPECIAL_SHIFT as i64)
-                | ruby_special_consts::RUBY_FIXNUM_FLAG as i64) as VALUE
-        } else {
-            rb_int2big(value as isize)
-        }
-    }
+    unsafe { rb_ll2inum(value) }
 }
 
 fn c_name(bytes: &[u8]) -> *const c_char {
@@ -937,9 +931,14 @@ unsafe extern "C" fn graphics_set_scale(argc: c_int, argv: *const VALUE, _self: 
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let value = rb_num2long(*argv) as f32;
+    let value = rb_num2dbl(*argv) as f32;
     let clamped = if value <= 0.0 { 1.0 } else { value };
     SCALE_FACTOR.store(clamped.to_bits(), Ordering::Relaxed);
+    let base_w = SCREEN_WIDTH.load(Ordering::Relaxed);
+    let base_h = SCREEN_HEIGHT.load(Ordering::Relaxed);
+    let win_w = ((base_w as f32 * clamped).round() as u32).max(1);
+    let win_h = ((base_h as f32 * clamped).round() as u32).max(1);
+    system::resize_window(win_w, win_h);
     rb_sys::Qnil as VALUE
 }
 

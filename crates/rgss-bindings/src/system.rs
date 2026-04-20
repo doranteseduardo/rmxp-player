@@ -71,7 +71,7 @@ static PLATFORM_INFO: Lazy<RwLock<PlatformInfo>> = Lazy::new(|| {
 });
 static GAME_TITLE: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new("RMXP Native Player".into()));
 static FRAME_DELTA_SECS: OnceCell<RwLock<f64>> = OnceCell::new();
-static WINDOW_DIMENSIONS: Lazy<RwLock<(u32, u32)>> = Lazy::new(|| RwLock::new((640, 480)));
+static WINDOW_DIMENSIONS: Lazy<RwLock<(u32, u32)>> = Lazy::new(|| RwLock::new((512, 384)));
 static DEFAULT_FONT_FAMILY: Lazy<RwLock<Option<String>>> = Lazy::new(|| RwLock::new(None));
 
 type RubyFn = unsafe extern "C" fn(c_int, *const VALUE, VALUE) -> VALUE;

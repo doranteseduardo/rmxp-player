@@ -6,6 +6,7 @@ use std::os::raw::{c_char, c_int};
 
 extern "C" {
     fn rb_const_get(module: VALUE, id: ID) -> VALUE;
+    fn rb_const_defined(module: VALUE, id: ID) -> c_int;
     fn rb_intern(name: *const c_char) -> ID;
     fn rb_funcall(recv: VALUE, mid: ID, argc: c_int, ...) -> VALUE;
     fn rb_protect(
@@ -77,6 +78,9 @@ pub fn resume_main() -> Result<MainResult> {
             return Ok(MainResult::Reset);
         }
         let message = unsafe { crate::current_exception_message() };
+        if let Some(full) = unsafe { crate::current_exception_full_message() } {
+            tracing::warn!(target: "rgss", "{}", full);
+        }
         return Err(anyhow!("Ruby exception during rgss_main: {message}"));
     }
     if value == rb_sys::Qfalse as VALUE || value == rb_sys::Qnil as VALUE {
@@ -95,16 +99,7 @@ unsafe fn is_reset_exception() -> bool {
     // Try to resolve the Reset constant; if it doesn't exist the game doesn't use it.
     let reset_name = CString::new("Reset").expect("cstr");
     let reset_id = rb_intern(reset_name.as_ptr());
-    let has_reset = rb_funcall(
-        rb_cObject,
-        {
-            let n = CString::new("const_defined?").expect("cstr");
-            rb_intern(n.as_ptr())
-        },
-        1,
-        reset_id as VALUE,
-    );
-    if has_reset == rb_sys::Qfalse as VALUE || has_reset == rb_sys::Qnil as VALUE {
+    if rb_const_defined(rb_cObject, reset_id) == 0 {
         return false;
     }
     let reset_class = rb_const_get(rb_cObject, reset_id);

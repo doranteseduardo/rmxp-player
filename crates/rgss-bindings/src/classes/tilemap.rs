@@ -191,6 +191,10 @@ fn get_tilemap(value: VALUE) -> &'static mut TilemapValue {
         .expect("Tilemap missing native data")
 }
 
+fn try_get_tilemap(value: VALUE) -> Option<&'static mut TilemapValue> {
+    unsafe { get_typed_data(value, TILEMAP_TYPE.as_rb_type()) }
+}
+
 unsafe extern "C" fn tilemap_initialize(
     argc: c_int,
     argv: *const VALUE,
@@ -245,7 +249,7 @@ unsafe extern "C" fn tilemap_disposed_q(
     _argv: *const VALUE,
     self_value: VALUE,
 ) -> VALUE {
-    bool_to_value(get_tilemap(self_value).disposed)
+    bool_to_value(try_get_tilemap(self_value).map(|t| t.disposed).unwrap_or(true))
 }
 
 macro_rules! tilemap_int_getter {

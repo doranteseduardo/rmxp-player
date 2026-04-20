@@ -576,7 +576,7 @@ fn engine_set_inner_size(width: u32, height: u32) {
 }
 
 fn engine_get_display_size() -> (u32, u32) {
-    let mut size = (640u32, 480u32);
+    let mut size = (512u32, 384u32);
     with_window(|window| {
         let inner = window.inner_size();
         size = (inner.width.max(1), inner.height.max(1));

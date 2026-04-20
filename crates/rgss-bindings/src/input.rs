@@ -3,8 +3,8 @@ use anyhow::{anyhow, Result};
 use arboard::Clipboard;
 use once_cell::sync::{Lazy, OnceCell};
 use rb_sys::{
-    rb_define_module, rb_float_new, rb_id2sym, rb_int2big, rb_intern, rb_num2int,
-    rb_string_value_cstr, rb_utf8_str_new, special_consts, VALUE,
+    rb_define_module, rb_float_new, rb_id2sym, rb_intern, rb_ll2inum, rb_num2int,
+    rb_string_value_cstr, rb_utf8_str_new, VALUE,
 };
 use std::{
     ffi::CString,
@@ -582,13 +582,14 @@ unsafe extern "C" fn input_press_qmark(argc: c_int, argv: *const VALUE, _self: V
 }
 
 unsafe extern "C" fn input_trigger_qmark(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
-    bool_to_value(match extract_button(argc, argv) {
+    let result = match extract_button(argc, argv) {
         Some(mask) => STORE
             .lock()
             .map(|store| store.is_triggered(mask))
             .unwrap_or(false),
         None => false,
-    })
+    };
+    bool_to_value(result)
 }
 
 unsafe extern "C" fn input_repeat_qmark(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
@@ -764,7 +765,11 @@ unsafe fn extract_button(argc: c_int, argv: *const VALUE) -> Option<ButtonMask> 
     if argc != 1 || argv.is_null() {
         return None;
     }
-    let button_id = rb_num2int(*argv) as i32;
+    let val = *argv;
+    if val & (rb_sys::ruby_special_consts::RUBY_FIXNUM_FLAG as VALUE) == 0 {
+        return None;
+    }
+    let button_id = rb_num2int(val) as i32;
     BUTTON_TABLE
         .iter()
         .find(|entry| entry.rgss_id == button_id)
@@ -773,9 +778,9 @@ unsafe fn extract_button(argc: c_int, argv: *const VALUE) -> Option<ButtonMask> 
 
 #[derive(Default)]
 struct InputStore {
-    current: ButtonMask,
-    previous: ButtonMask,
-    pending: ButtonMask,
+    pub current: ButtonMask,
+    pub previous: ButtonMask,
+    pub pending: ButtonMask,
     hold_frames: [u16; BUTTON_COUNT],
     hold_time: [f64; BUTTON_COUNT],
 }
@@ -911,15 +916,7 @@ fn bool_to_value(value: bool) -> VALUE {
 }
 
 fn int_to_value(value: i64) -> VALUE {
-    unsafe {
-        if value >= special_consts::FIXNUM_MIN as i64 && value <= special_consts::FIXNUM_MAX as i64
-        {
-            ((value << rb_sys::ruby_special_consts::RUBY_SPECIAL_SHIFT as i64)
-                | rb_sys::ruby_special_consts::RUBY_FIXNUM_FLAG as i64) as VALUE
-        } else {
-            rb_int2big(value as isize)
-        }
-    }
+    unsafe { rb_ll2inum(value) }
 }
 
 fn c_name(bytes: &[u8]) -> *const c_char {
