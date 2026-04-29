@@ -192,7 +192,7 @@ pub fn set_cursor_rect(id: u32, rect: RectData) {
 
 unsafe fn define_window_api() -> Result<()> {
     let native = native_module()?;
-    rb_define_module_function(native, c_name(CREATE_NAME), Some(window_create), 0);
+    rb_define_module_function(native, c_name(CREATE_NAME), Some(window_create), -1);
     rb_define_module_function(native, c_name(DISPOSE_NAME), Some(window_dispose), -1);
     rb_define_module_function(
         native,

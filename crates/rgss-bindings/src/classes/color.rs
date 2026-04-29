@@ -47,6 +47,8 @@ static METHOD_EQUAL: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"==\0") });
 static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
+static METHOD_CLONE: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"clone\0") });
 static METHOD_TO_A: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
 static METHOD_DUMP: Lazy<&'static CStr> =
@@ -80,17 +82,18 @@ pub fn init() -> Result<()> {
         install_allocator(klass, Some(color_allocate));
         define_method(klass, *METHOD_INITIALIZE, color_initialize, -1);
         define_method(klass, *METHOD_SET, color_set, -1);
-        define_method(klass, *METHOD_RED, color_get_red, 0);
+        define_method(klass, *METHOD_RED, color_get_red, -1);
         define_method(klass, *METHOD_RED_SET, color_set_red, -1);
-        define_method(klass, *METHOD_GREEN, color_get_green, 0);
+        define_method(klass, *METHOD_GREEN, color_get_green, -1);
         define_method(klass, *METHOD_GREEN_SET, color_set_green, -1);
-        define_method(klass, *METHOD_BLUE, color_get_blue, 0);
+        define_method(klass, *METHOD_BLUE, color_get_blue, -1);
         define_method(klass, *METHOD_BLUE_SET, color_set_blue, -1);
-        define_method(klass, *METHOD_ALPHA, color_get_alpha, 0);
+        define_method(klass, *METHOD_ALPHA, color_get_alpha, -1);
         define_method(klass, *METHOD_ALPHA_SET, color_set_alpha, -1);
         define_method(klass, *METHOD_EQUAL, color_equal, -1);
-        define_method(klass, *METHOD_DUP, color_dup, 0);
-        define_method(klass, *METHOD_TO_A, color_to_a, 0);
+        define_method(klass, *METHOD_DUP, color_dup, -1);
+        define_method(klass, *METHOD_CLONE, color_dup, -1);
+        define_method(klass, *METHOD_TO_A, color_to_a, -1);
         define_method(klass, *METHOD_DUMP, color_dump, -1);
         define_singleton_method(klass, *METHOD_LOAD, color_load, -1);
     }

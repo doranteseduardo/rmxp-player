@@ -353,7 +353,7 @@ unsafe fn define_input() -> Result<()> {
         return Err(anyhow!("failed to define Input module"));
     }
 
-    rb_define_module_function(module, c_name(DELTA_NAME), Some(input_delta), 0);
+    rb_define_module_function(module, c_name(DELTA_NAME), Some(input_delta), -1);
     rb_define_module_function(module, c_name(UPDATE_NAME), Some(input_update), -1);
     rb_define_module_function(module, c_name(PRESS_Q_NAME), Some(input_press_qmark), -1);
     rb_define_module_function(module, c_name(TRIGGER_Q_NAME), Some(input_trigger_qmark), -1);
@@ -361,11 +361,11 @@ unsafe fn define_input() -> Result<()> {
     rb_define_module_function(module, c_name(RELEASE_Q_NAME), Some(input_release_qmark), -1);
     rb_define_module_function(module, c_name(COUNT_NAME), Some(input_count), -1);
     rb_define_module_function(module, c_name(TIME_Q_NAME), Some(input_time_qmark), -1);
-    rb_define_module_function(module, c_name(DIR4_NAME), Some(input_dir4), 0);
-    rb_define_module_function(module, c_name(DIR8_NAME), Some(input_dir8), 0);
-    rb_define_module_function(module, c_name(MOUSE_X_NAME), Some(input_mouse_x), 0);
-    rb_define_module_function(module, c_name(MOUSE_Y_NAME), Some(input_mouse_y), 0);
-    rb_define_module_function(module, c_name(SCROLL_V_NAME), Some(input_scroll_v), 0);
+    rb_define_module_function(module, c_name(DIR4_NAME), Some(input_dir4), -1);
+    rb_define_module_function(module, c_name(DIR8_NAME), Some(input_dir8), -1);
+    rb_define_module_function(module, c_name(MOUSE_X_NAME), Some(input_mouse_x), -1);
+    rb_define_module_function(module, c_name(MOUSE_Y_NAME), Some(input_mouse_y), -1);
+    rb_define_module_function(module, c_name(SCROLL_V_NAME), Some(input_scroll_v), -1);
     rb_define_module_function(
         module,
         c_name(MOUSE_IN_WINDOW_NAME),
@@ -384,15 +384,15 @@ unsafe fn define_input() -> Result<()> {
         Some(input_raw_key_states),
         0,
     );
-    rb_define_module_function(module, c_name(TEXT_INPUT_NAME), Some(input_text_input), 0);
+    rb_define_module_function(module, c_name(TEXT_INPUT_NAME), Some(input_text_input), -1);
     rb_define_module_function(
         module,
         c_name(TEXT_INPUT_SET_NAME),
         Some(input_set_text_input),
         -1,
     );
-    rb_define_module_function(module, c_name(GETS_NAME), Some(input_gets), 0);
-    rb_define_module_function(module, c_name(CLIPBOARD_NAME), Some(input_clipboard), 0);
+    rb_define_module_function(module, c_name(GETS_NAME), Some(input_gets), -1);
+    rb_define_module_function(module, c_name(CLIPBOARD_NAME), Some(input_clipboard), -1);
     rb_define_module_function(
         module,
         c_name(CLIPBOARD_SET_NAME),

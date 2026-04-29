@@ -210,8 +210,8 @@ fn set_window_dimensions(width: u32, height: u32) {
 }
 
 unsafe fn define_system_functions(module: VALUE) -> Result<()> {
-    rb_define_module_function(module, c_name(DELTA_NAME), Some(system_delta), 0);
-    rb_define_module_function(module, c_name(UPTIME_NAME), Some(system_uptime), 0);
+    rb_define_module_function(module, c_name(DELTA_NAME), Some(system_delta), -1);
+    rb_define_module_function(module, c_name(UPTIME_NAME), Some(system_uptime), -1);
     rb_define_module_function(
         module,
         c_name(SET_WINDOW_TITLE_NAME),
@@ -230,14 +230,14 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         Some(system_set_window_title),
         -1,
     );
-    rb_define_module_function(module, c_name(GAME_TITLE_NAME), Some(system_game_title), 0);
+    rb_define_module_function(module, c_name(GAME_TITLE_NAME), Some(system_game_title), -1);
     rb_define_module_function(
         module,
         c_name(USER_LANGUAGE_NAME),
         Some(system_user_language),
         0,
     );
-    rb_define_module_function(module, c_name(USER_NAME_NAME), Some(system_user_name), 0);
+    rb_define_module_function(module, c_name(USER_NAME_NAME), Some(system_user_name), -1);
     rb_define_module_function(
         module,
         c_name(POWER_STATE_NAME),
@@ -282,16 +282,16 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         Some(system_desensitize),
         -1,
     );
-    rb_define_module_function(module, c_name(PLATFORM_NAME), Some(system_platform), 0);
-    rb_define_module_function(module, c_name(IS_MAC_Q_NAME), Some(system_is_mac_q), 0);
-    rb_define_module_function(module, c_name(IS_LINUX_Q_NAME), Some(system_is_linux_q), 0);
+    rb_define_module_function(module, c_name(PLATFORM_NAME), Some(system_platform), -1);
+    rb_define_module_function(module, c_name(IS_MAC_Q_NAME), Some(system_is_mac_q), -1);
+    rb_define_module_function(module, c_name(IS_LINUX_Q_NAME), Some(system_is_linux_q), -1);
     rb_define_module_function(
         module,
         c_name(IS_WINDOWS_Q_NAME),
         Some(system_is_windows_q),
         0,
     );
-    rb_define_module_function(module, c_name(IS_REAL_MAC_Q_NAME), Some(system_is_mac_q), 0);
+    rb_define_module_function(module, c_name(IS_REAL_MAC_Q_NAME), Some(system_is_mac_q), -1);
     rb_define_module_function(
         module,
         c_name(IS_REAL_LINUX_Q_NAME),
@@ -310,9 +310,9 @@ unsafe fn define_system_functions(module: VALUE) -> Result<()> {
         Some(system_is_rosetta_q),
         0,
     );
-    rb_define_module_function(module, c_name(IS_WINE_Q_NAME), Some(system_is_wine_q), 0);
-    rb_define_module_function(module, c_name(NPROC_NAME), Some(system_nproc), 0);
-    rb_define_module_function(module, c_name(MEMORY_NAME), Some(system_memory), 0);
+    rb_define_module_function(module, c_name(IS_WINE_Q_NAME), Some(system_is_wine_q), -1);
+    rb_define_module_function(module, c_name(NPROC_NAME), Some(system_nproc), -1);
+    rb_define_module_function(module, c_name(MEMORY_NAME), Some(system_memory), -1);
     rb_define_module_function(
         module,
         c_name(FILE_EXIST_Q_NAME),

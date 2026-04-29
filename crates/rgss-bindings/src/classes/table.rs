@@ -73,12 +73,12 @@ pub fn init() -> Result<()> {
         define_method(klass, *METHOD_RESIZE, table_resize, -1);
         define_method(klass, *METHOD_GET, table_get, -1);
         define_method(klass, *METHOD_SET, table_set, -1);
-        define_method(klass, *METHOD_XSIZE, table_xsize, 0);
-        define_method(klass, *METHOD_YSIZE, table_ysize, 0);
-        define_method(klass, *METHOD_ZSIZE, table_zsize, 0);
-        define_method(klass, *METHOD_CLONE, table_clone, 0);
-        define_method(klass, *METHOD_DUP, table_dup, 0);
-        define_method(klass, *METHOD_PACK, table_pack, 0);
+        define_method(klass, *METHOD_XSIZE, table_xsize, -1);
+        define_method(klass, *METHOD_YSIZE, table_ysize, -1);
+        define_method(klass, *METHOD_ZSIZE, table_zsize, -1);
+        define_method(klass, *METHOD_CLONE, table_clone, -1);
+        define_method(klass, *METHOD_DUP, table_dup, -1);
+        define_method(klass, *METHOD_PACK, table_pack, -1);
         define_method(klass, *METHOD_DUMP, table_dump, -1);
         define_singleton_method(klass, *METHOD_LOAD, table_load, -1);
     }

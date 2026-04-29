@@ -56,13 +56,13 @@ pub fn init() -> Result<()> {
         let _ = BITMAP_CLASS.set(klass);
         install_allocator(klass, Some(bitmap_allocate));
         define_method(klass, cstr(b"initialize\0"), bitmap_initialize, -1);
-        define_method(klass, cstr(b"dispose\0"), bitmap_dispose, 0);
-        define_method(klass, cstr(b"disposed?\0"), bitmap_disposed_q, 0);
-        define_method(klass, cstr(b"width\0"), bitmap_width, 0);
-        define_method(klass, cstr(b"height\0"), bitmap_height, 0);
-        define_method(klass, cstr(b"rect\0"), bitmap_rect, 0);
+        define_method(klass, cstr(b"dispose\0"), bitmap_dispose, -1);
+        define_method(klass, cstr(b"disposed?\0"), bitmap_disposed_q, -1);
+        define_method(klass, cstr(b"width\0"), bitmap_width, -1);
+        define_method(klass, cstr(b"height\0"), bitmap_height, -1);
+        define_method(klass, cstr(b"rect\0"), bitmap_rect, -1);
         define_method(klass, cstr(b"hue_change\0"), bitmap_hue_change, -1);
-        define_method(klass, cstr(b"clear\0"), bitmap_clear, 0);
+        define_method(klass, cstr(b"clear\0"), bitmap_clear, -1);
         define_method(klass, cstr(b"fill_rect\0"), bitmap_fill_rect, -1);
         define_method(
             klass,
@@ -76,17 +76,17 @@ pub fn init() -> Result<()> {
         define_method(klass, cstr(b"set_pixel\0"), bitmap_set_pixel, -1);
         define_method(klass, cstr(b"text_size\0"), bitmap_text_size, -1);
         define_method(klass, cstr(b"draw_text\0"), bitmap_draw_text, -1);
-        define_method(klass, cstr(b"dup\0"), bitmap_dup, 0);
-        define_method(klass, cstr(b"clone\0"), bitmap_dup, 0);
-        define_method(klass, cstr(b"font\0"), bitmap_get_font, 0);
+        define_method(klass, cstr(b"dup\0"), bitmap_dup, -1);
+        define_method(klass, cstr(b"clone\0"), bitmap_dup, -1);
+        define_method(klass, cstr(b"font\0"), bitmap_get_font, -1);
         define_method(klass, cstr(b"font=\0"), bitmap_set_font, -1);
-        define_method(klass, cstr(b"animated?\0"), bitmap_animated_q, 0);
+        define_method(klass, cstr(b"animated?\0"), bitmap_animated_q, -1);
         define_method(klass, cstr(b"play\0"), bitmap_play, -1);
         define_method(klass, cstr(b"goto_and_stop\0"), bitmap_goto_and_stop, -1);
-        define_method(klass, cstr(b"text_offset_y\0"), bitmap_get_text_offset_y, 0);
+        define_method(klass, cstr(b"text_offset_y\0"), bitmap_get_text_offset_y, -1);
         define_method(klass, cstr(b"text_offset_y=\0"), bitmap_set_text_offset_y, -1);
 
-        define_singleton_method(klass, cstr(b"max_size\0"), bitmap_max_size, 0);
+        define_singleton_method(klass, cstr(b"max_size\0"), bitmap_max_size, -1);
         define_singleton_method(klass, cstr(b"max_size=\0"), bitmap_set_max_size, -1);
         define_singleton_method(klass, cstr(b"_native_wrap\0"), bitmap_native_wrap, -1);
     }

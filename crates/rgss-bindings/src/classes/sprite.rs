@@ -89,51 +89,51 @@ pub fn init() -> Result<()> {
         let _ = SPRITE_CLASS.set(klass);
         install_allocator(klass, Some(sprite_allocate));
         define_method(klass, cstr(b"initialize\0"), sprite_initialize, -1);
-        define_method(klass, cstr(b"dispose\0"), sprite_dispose, 0);
-        define_method(klass, cstr(b"disposed?\0"), sprite_disposed_q, 0);
-        define_method(klass, cstr(b"viewport\0"), sprite_get_viewport, 0);
+        define_method(klass, cstr(b"dispose\0"), sprite_dispose, -1);
+        define_method(klass, cstr(b"disposed?\0"), sprite_disposed_q, -1);
+        define_method(klass, cstr(b"viewport\0"), sprite_get_viewport, -1);
         define_method(klass, cstr(b"viewport=\0"), sprite_set_viewport, -1);
-        define_method(klass, cstr(b"bitmap\0"), sprite_get_bitmap, 0);
+        define_method(klass, cstr(b"bitmap\0"), sprite_get_bitmap, -1);
         define_method(klass, cstr(b"bitmap=\0"), sprite_set_bitmap, -1);
-        define_method(klass, cstr(b"x\0"), sprite_get_x, 0);
+        define_method(klass, cstr(b"x\0"), sprite_get_x, -1);
         define_method(klass, cstr(b"x=\0"), sprite_set_x, -1);
-        define_method(klass, cstr(b"y\0"), sprite_get_y, 0);
+        define_method(klass, cstr(b"y\0"), sprite_get_y, -1);
         define_method(klass, cstr(b"y=\0"), sprite_set_y, -1);
-        define_method(klass, cstr(b"z\0"), sprite_get_z, 0);
+        define_method(klass, cstr(b"z\0"), sprite_get_z, -1);
         define_method(klass, cstr(b"z=\0"), sprite_set_z, -1);
-        define_method(klass, cstr(b"ox\0"), sprite_get_ox, 0);
+        define_method(klass, cstr(b"ox\0"), sprite_get_ox, -1);
         define_method(klass, cstr(b"ox=\0"), sprite_set_ox, -1);
-        define_method(klass, cstr(b"oy\0"), sprite_get_oy, 0);
+        define_method(klass, cstr(b"oy\0"), sprite_get_oy, -1);
         define_method(klass, cstr(b"oy=\0"), sprite_set_oy, -1);
-        define_method(klass, cstr(b"width\0"), sprite_get_width, 0);
-        define_method(klass, cstr(b"height\0"), sprite_get_height, 0);
-        define_method(klass, cstr(b"zoom_x\0"), sprite_get_zoom_x, 0);
+        define_method(klass, cstr(b"width\0"), sprite_get_width, -1);
+        define_method(klass, cstr(b"height\0"), sprite_get_height, -1);
+        define_method(klass, cstr(b"zoom_x\0"), sprite_get_zoom_x, -1);
         define_method(klass, cstr(b"zoom_x=\0"), sprite_set_zoom_x, -1);
-        define_method(klass, cstr(b"zoom_y\0"), sprite_get_zoom_y, 0);
+        define_method(klass, cstr(b"zoom_y\0"), sprite_get_zoom_y, -1);
         define_method(klass, cstr(b"zoom_y=\0"), sprite_set_zoom_y, -1);
-        define_method(klass, cstr(b"angle\0"), sprite_get_angle, 0);
+        define_method(klass, cstr(b"angle\0"), sprite_get_angle, -1);
         define_method(klass, cstr(b"angle=\0"), sprite_set_angle, -1);
-        define_method(klass, cstr(b"mirror\0"), sprite_get_mirror, 0);
+        define_method(klass, cstr(b"mirror\0"), sprite_get_mirror, -1);
         define_method(klass, cstr(b"mirror=\0"), sprite_set_mirror, -1);
-        define_method(klass, cstr(b"bush_depth\0"), sprite_get_bush_depth, 0);
+        define_method(klass, cstr(b"bush_depth\0"), sprite_get_bush_depth, -1);
         define_method(klass, cstr(b"bush_depth=\0"), sprite_set_bush_depth, -1);
-        define_method(klass, cstr(b"bush_opacity\0"), sprite_get_bush_opacity, 0);
+        define_method(klass, cstr(b"bush_opacity\0"), sprite_get_bush_opacity, -1);
         define_method(klass, cstr(b"bush_opacity=\0"), sprite_set_bush_opacity, -1);
-        define_method(klass, cstr(b"opacity\0"), sprite_get_opacity, 0);
+        define_method(klass, cstr(b"opacity\0"), sprite_get_opacity, -1);
         define_method(klass, cstr(b"opacity=\0"), sprite_set_opacity, -1);
-        define_method(klass, cstr(b"blend_type\0"), sprite_get_blend_type, 0);
+        define_method(klass, cstr(b"blend_type\0"), sprite_get_blend_type, -1);
         define_method(klass, cstr(b"blend_type=\0"), sprite_set_blend_type, -1);
-        define_method(klass, cstr(b"visible\0"), sprite_get_visible, 0);
+        define_method(klass, cstr(b"visible\0"), sprite_get_visible, -1);
         define_method(klass, cstr(b"visible=\0"), sprite_set_visible, -1);
-        define_method(klass, cstr(b"src_rect\0"), sprite_get_src_rect, 0);
+        define_method(klass, cstr(b"src_rect\0"), sprite_get_src_rect, -1);
         define_method(klass, cstr(b"src_rect=\0"), sprite_set_src_rect, -1);
-        define_method(klass, cstr(b"color\0"), sprite_get_color, 0);
+        define_method(klass, cstr(b"color\0"), sprite_get_color, -1);
         define_method(klass, cstr(b"color=\0"), sprite_set_color, -1);
-        define_method(klass, cstr(b"tone\0"), sprite_get_tone, 0);
+        define_method(klass, cstr(b"tone\0"), sprite_get_tone, -1);
         define_method(klass, cstr(b"tone=\0"), sprite_set_tone, -1);
         define_method(klass, cstr(b"flash\0"), sprite_flash, -1);
-        define_method(klass, cstr(b"update\0"), sprite_update, 0);
-        define_method(klass, cstr(b"native_id\0"), sprite_native_id, 0);
+        define_method(klass, cstr(b"update\0"), sprite_update, -1);
+        define_method(klass, cstr(b"native_id\0"), sprite_native_id, -1);
     }
     Ok(())
 }
@@ -399,14 +399,8 @@ unsafe extern "C" fn sprite_get_bitmap(
     self_value: VALUE,
 ) -> VALUE {
     match get_sprite(self_value) {
-        Some(s) => {
-            warn!(target: "rgss", "sprite_get_bitmap: self={:#x} returning={:#x}", self_value, s.bitmap);
-            s.bitmap
-        }
-        None => {
-            warn!(target: "rgss", "sprite_get_bitmap: get_sprite returned None for self={:#x}", self_value);
-            rb_sys::Qnil as VALUE
-        }
+        Some(s) => s.bitmap,
+        None => rb_sys::Qnil as VALUE,
     }
 }
 

@@ -16,7 +16,7 @@ use once_cell::sync::OnceCell;
 use rb_sys::{
     rb_ary_new, rb_ary_push, rb_errinfo, rb_eval_string_protect, rb_gv_set, rb_intern,
     rb_obj_as_string, rb_require, rb_string_value_cstr, rb_utf8_str_new, ruby_init_loadpath,
-    ruby_init_stack, ruby_setup, ruby_sysinit, VALUE,
+    ruby_init_stack, ruby_options, ruby_setup, ruby_sysinit, VALUE,
 };
 use std::{
     env,
@@ -280,10 +280,29 @@ unsafe fn start_ruby() -> Result<()> {
         return Err(anyhow!("ruby_setup failed with code {code}"));
     }
     ruby_init_loadpath();
+
+    // Load Ruby's `<internal:*>` prelude files (kernel.rb, warning.rb, timev.rb,
+    // etc.) which define core methods like Object#clone, Object#frozen?,
+    // Kernel#warn, Integer#even?, Time.now. These are NOT loaded by
+    // ruby_setup/ruby_init alone — only ruby_options triggers them as a side
+    // effect of its parsing setup. We pass `-e ""` (empty script, never run)
+    // because ruby_options requires a program. ruby_run_node is intentionally
+    // not called: the empty script doesn't need to execute.
+    let prog = CString::new("ruby")?;
+    let dash_e = CString::new("-e")?;
+    let empty = CString::new("")?;
+    let mut prelude_argv: [*mut c_char; 3] = [
+        prog.as_ptr() as *mut c_char,
+        dash_e.as_ptr() as *mut c_char,
+        empty.as_ptr() as *mut c_char,
+    ];
+    ruby_options(3, prelude_argv.as_mut_ptr());
+
     require_feature("enc/encdb")?;
     require_feature("enc/trans/transdb")?;
     Ok(())
 }
+
 
 fn configure_ruby_load_path() {
     let mut paths = Vec::new();

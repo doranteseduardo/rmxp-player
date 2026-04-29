@@ -41,7 +41,7 @@ unsafe fn define_kernel_functions() -> Result<()> {
         return Err(anyhow!("rb_mKernel is null"));
     }
     rb_define_module_function(kernel, c_name(RGSS_MAIN_NAME), Some(kernel_rgss_main), -1);
-    rb_define_module_function(kernel, c_name(RGSS_STOP_NAME), Some(kernel_rgss_stop), 0);
+    rb_define_module_function(kernel, c_name(RGSS_STOP_NAME), Some(kernel_rgss_stop), -1);
     rb_define_method(kernel, c_name(CLASS_NAME), Some(kernel_class), -1);
     Ok(())
 }

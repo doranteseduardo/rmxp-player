@@ -47,6 +47,8 @@ static METHOD_EQUAL: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"==\0") });
 static METHOD_DUP: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"dup\0") });
+static METHOD_CLONE: Lazy<&'static CStr> =
+    Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"clone\0") });
 static METHOD_TO_A: Lazy<&'static CStr> =
     Lazy::new(|| unsafe { CStr::from_bytes_with_nul_unchecked(b"to_a\0") });
 static METHOD_DUMP: Lazy<&'static CStr> =
@@ -80,17 +82,18 @@ pub fn init() -> Result<()> {
         install_allocator(klass, Some(tone_allocate));
         define_method(klass, *METHOD_INITIALIZE, tone_initialize, -1);
         define_method(klass, *METHOD_SET, tone_set, -1);
-        define_method(klass, *METHOD_RED, tone_get_red, 0);
+        define_method(klass, *METHOD_RED, tone_get_red, -1);
         define_method(klass, *METHOD_RED_SET, tone_set_red, -1);
-        define_method(klass, *METHOD_GREEN, tone_get_green, 0);
+        define_method(klass, *METHOD_GREEN, tone_get_green, -1);
         define_method(klass, *METHOD_GREEN_SET, tone_set_green, -1);
-        define_method(klass, *METHOD_BLUE, tone_get_blue, 0);
+        define_method(klass, *METHOD_BLUE, tone_get_blue, -1);
         define_method(klass, *METHOD_BLUE_SET, tone_set_blue, -1);
-        define_method(klass, *METHOD_GRAY, tone_get_gray, 0);
+        define_method(klass, *METHOD_GRAY, tone_get_gray, -1);
         define_method(klass, *METHOD_GRAY_SET, tone_set_gray, -1);
         define_method(klass, *METHOD_EQUAL, tone_equal, -1);
-        define_method(klass, *METHOD_DUP, tone_dup, 0);
-        define_method(klass, *METHOD_TO_A, tone_to_a, 0);
+        define_method(klass, *METHOD_DUP, tone_dup, -1);
+        define_method(klass, *METHOD_CLONE, tone_dup, -1);
+        define_method(klass, *METHOD_TO_A, tone_to_a, -1);
         define_method(klass, *METHOD_DUMP, tone_dump, -1);
         define_singleton_method(klass, *METHOD_LOAD, tone_load, -1);
     }

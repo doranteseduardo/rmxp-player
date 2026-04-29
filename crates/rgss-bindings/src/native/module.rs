@@ -114,7 +114,7 @@ unsafe fn define_native_functions(module: VALUE) -> Result<()> {
         Some(native_config_path),
         0,
     );
-    rb_define_module_function(module, c_name(SAVE_PATH_NAME), Some(native_save_path), 0);
+    rb_define_module_function(module, c_name(SAVE_PATH_NAME), Some(native_save_path), -1);
     rb_define_module_function(module, c_name(CLASS_OF_NAME), Some(native_class_of), -1);
     rb_define_module_function(module, c_name(MARSHAL_LOAD_NAME), Some(native_marshal_load), -1);
     Ok(())

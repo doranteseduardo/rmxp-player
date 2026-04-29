@@ -227,7 +227,7 @@ unsafe fn define_graphics() -> Result<()> {
         Some(graphics_set_frame_rate),
         -1,
     );
-    rb_define_module_function(module, c_name(FREEZE_NAME), Some(graphics_freeze), 0);
+    rb_define_module_function(module, c_name(FREEZE_NAME), Some(graphics_freeze), -1);
     rb_define_module_function(
         module,
         c_name(TRANSITION_NAME),
@@ -243,8 +243,8 @@ unsafe fn define_graphics() -> Result<()> {
     rb_define_module_function(module, c_name(WAIT_NAME), Some(graphics_wait), -1);
     rb_define_module_function(module, c_name(FADEOUT_NAME), Some(graphics_fadeout), -1);
     rb_define_module_function(module, c_name(FADEIN_NAME), Some(graphics_fadein), -1);
-    rb_define_module_function(module, c_name(WIDTH_NAME), Some(graphics_get_width), 0);
-    rb_define_module_function(module, c_name(HEIGHT_NAME), Some(graphics_get_height), 0);
+    rb_define_module_function(module, c_name(WIDTH_NAME), Some(graphics_get_width), -1);
+    rb_define_module_function(module, c_name(HEIGHT_NAME), Some(graphics_get_height), -1);
     rb_define_module_function(
         module,
         c_name(RESIZE_SCREEN_NAME),
@@ -275,10 +275,10 @@ unsafe fn define_graphics() -> Result<()> {
         Some(graphics_set_brightness),
         -1,
     );
-    rb_define_module_function(module, c_name(TONE_GET_NAME), Some(graphics_get_tone), 0);
+    rb_define_module_function(module, c_name(TONE_GET_NAME), Some(graphics_get_tone), -1);
     rb_define_module_function(module, c_name(TONE_SET_NAME), Some(graphics_set_tone), -1);
     rb_define_module_function(module, c_name(FLASH_NAME), Some(graphics_flash), -1);
-    rb_define_module_function(module, c_name(DELTA_NAME), Some(graphics_delta), 0);
+    rb_define_module_function(module, c_name(DELTA_NAME), Some(graphics_delta), -1);
     rb_define_module_function(
         module,
         c_name(DISPLAY_WIDTH_NAME),
@@ -291,15 +291,15 @@ unsafe fn define_graphics() -> Result<()> {
         Some(graphics_display_height),
         0,
     );
-    rb_define_module_function(module, c_name(CENTER_NAME), Some(graphics_center), 0);
+    rb_define_module_function(module, c_name(CENTER_NAME), Some(graphics_center), -1);
     rb_define_module_function(
         module,
         c_name(RESIZE_WINDOW_NAME),
         Some(graphics_resize_window),
         -1,
     );
-    rb_define_module_function(module, c_name(BLUR_NAME), Some(graphics_blur), 0);
-    rb_define_module_function(module, c_name(SHARPEN_NAME), Some(graphics_sharpen), 0);
+    rb_define_module_function(module, c_name(BLUR_NAME), Some(graphics_blur), -1);
+    rb_define_module_function(module, c_name(SHARPEN_NAME), Some(graphics_sharpen), -1);
     rb_define_module_function(
         module,
         c_name(AVERAGE_FRAME_RATE_NAME),
@@ -330,7 +330,7 @@ unsafe fn define_graphics() -> Result<()> {
         Some(graphics_set_show_cursor),
         -1,
     );
-    rb_define_module_function(module, c_name(SCALE_NAME), Some(graphics_get_scale), 0);
+    rb_define_module_function(module, c_name(SCALE_NAME), Some(graphics_get_scale), -1);
     rb_define_module_function(module, c_name(SCALE_SET_NAME), Some(graphics_set_scale), -1);
     rb_define_module_function(
         module,
