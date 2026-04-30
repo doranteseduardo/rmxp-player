@@ -196,6 +196,12 @@ pub fn run(config: AppConfig) -> Result<()> {
     let mut exit_requested = false;
     let mut had_main_loop = ruby_vm.has_main_loop();
 
+    // FPS counter: count rendered frames in a 1-second window, log + show in title.
+    let mut fps_window_start = Instant::now();
+    let mut fps_render_count: u32 = 0;
+    let mut fps_tick_count: u32 = 0;
+    let base_title = cfg.title.clone();
+
     event_loop.run(move |event, target| {
         let window_ref = unsafe { &*window_ptr };
         if input.update(&event) {
@@ -236,6 +242,7 @@ pub fn run(config: AppConfig) -> Result<()> {
                             return;
                         }
                         frame_index = frame_index.wrapping_add(1);
+                        fps_render_count += 1;
                     }
                     _ => {}
                 }
@@ -247,6 +254,25 @@ pub fn run(config: AppConfig) -> Result<()> {
                 update_frame_delta(delta.as_secs_f64());
                 graphics_tick(delta.as_secs_f64());
                 update_input(input_state.snapshot());
+                fps_tick_count += 1;
+                let window_elapsed = frame_start - fps_window_start;
+                if window_elapsed.as_secs_f64() >= 1.0 {
+                    let secs = window_elapsed.as_secs_f64();
+                    let render_fps = fps_render_count as f64 / secs;
+                    let tick_fps = fps_tick_count as f64 / secs;
+                    eprintln!(
+                        "[fps] render={:.1} tick={:.1}",
+                        render_fps, tick_fps
+                    );
+                    let title = format!(
+                        "{} — render {:.0} fps · tick {:.0} fps",
+                        base_title, render_fps, tick_fps
+                    );
+                    window_ref.set_title(&title);
+                    fps_window_start = frame_start;
+                    fps_render_count = 0;
+                    fps_tick_count = 0;
+                }
                 match ruby_vm.resume_main_loop() {
                     Ok(MainLoopOutcome::Active) => {
                         had_main_loop = true;

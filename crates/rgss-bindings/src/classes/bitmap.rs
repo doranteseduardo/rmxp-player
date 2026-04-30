@@ -331,7 +331,10 @@ unsafe extern "C" fn bitmap_stretch_blt(
     self_value: VALUE,
 ) -> VALUE {
     let args = slice_from(argc, argv);
-    if args.len() < 5 {
+    // RGSS API: stretch_blt(dest_rect, src_bitmap, src_rect[, opacity]) — 3
+    // required args. The previous `< 5` guard rejected every call PE/RGSS
+    // makes, leaving message-window backgrounds blank.
+    if args.len() < 3 {
         return rb_sys::Qnil as VALUE;
     }
     let (dest_rect, src_bitmap, src_rect_value, opacity) = normalize_stretch_args(&args);

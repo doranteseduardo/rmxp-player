@@ -11,14 +11,54 @@ use super::{
 };
 use crate::native::{self, value_to_bool, value_to_f32, value_to_i32, RectData};
 use anyhow::Result;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use rb_sys::{bindings::rb_gc_mark, VALUE};
 use std::{
+    collections::HashMap,
     ffi::{c_void, CStr},
     os::raw::c_int,
     slice,
+    sync::Mutex,
 };
 use tracing::warn;
+
+// Tracks live Ruby Sprite VALUEs by their native handle id. Used to sync
+// Ruby-side mutations back to native each frame — required because PE
+// mutates `sprite.src_rect.set(...)` (and similar) in-place, and our setters
+// only observe `=` assignments. Iteration runs from `sync_all_to_native()`
+// once per `Graphics.update`.
+static SPRITE_REGISTRY: Lazy<Mutex<HashMap<u32, VALUE>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn registry_insert(handle: u32, value: VALUE) {
+    if let Ok(mut g) = SPRITE_REGISTRY.lock() {
+        g.insert(handle, value);
+    }
+}
+
+fn registry_remove(handle: u32) {
+    if let Ok(mut g) = SPRITE_REGISTRY.lock() {
+        g.remove(&handle);
+    }
+}
+
+/// Iterate every live Sprite Ruby object and push its current Ruby state
+/// (including mutated Rect/Color/Tone children) to the native handle. Called
+/// from `Graphics.update` so the renderer's snapshot sees fresh data.
+pub fn sync_all_to_native() {
+    let snapshot: Vec<(u32, VALUE)> = match SPRITE_REGISTRY.lock() {
+        Ok(g) => g.iter().map(|(&k, &v)| (k, v)).collect(),
+        Err(_) => return,
+    };
+    for (handle, value) in snapshot {
+        let sprite_ptr = unsafe { super::common::get_typed_data::<SpriteValue>(value, SPRITE_TYPE.as_rb_type()) };
+        let Some(sprite) = sprite_ptr else { continue };
+        if sprite.disposed || sprite.handle != handle {
+            continue;
+        }
+        apply_all(sprite);
+    }
+}
 
 const SPRITE_CLASS_NAME: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"Sprite\0") };
 const SPRITE_STRUCT_NAME: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"RGSS::Sprite\0") };
@@ -169,6 +209,9 @@ unsafe extern "C" fn sprite_free(ptr: *mut c_void) {
         return;
     }
     let value = Box::<SpriteValue>::from_raw(ptr as *mut SpriteValue);
+    if value.handle != 0 {
+        registry_remove(value.handle);
+    }
     if !value.disposed && value.handle != 0 {
         native::sprite::dispose(value.handle);
     }
@@ -219,12 +262,14 @@ unsafe extern "C" fn sprite_initialize(
     sprite.blend_type = 0;
     sprite.visible = true;
     apply_all(sprite);
+    registry_insert(handle, self_value);
     self_value
 }
 
 unsafe extern "C" fn sprite_dispose(_argc: c_int, _argv: *const VALUE, self_value: VALUE) -> VALUE {
     let sprite = sprite_or_nil!(self_value);
     if !sprite.disposed && sprite.handle != 0 {
+        registry_remove(sprite.handle);
         native::sprite::dispose(sprite.handle);
         sprite.disposed = true;
     }
@@ -410,15 +455,10 @@ unsafe extern "C" fn sprite_set_bitmap(
     self_value: VALUE,
 ) -> VALUE {
     if argv.is_null() {
-        warn!(target: "rgss", "sprite_set_bitmap: argv is null");
         return rb_sys::Qnil as VALUE;
     }
     let value = *argv;
-    let class_name = rb_sys::rb_obj_classname(value);
-    let name = std::ffi::CStr::from_ptr(class_name).to_str().unwrap_or("?");
-    warn!(target: "rgss", "sprite_set_bitmap called: value class={} self={:#x}", name, self_value);
     let Some(sprite) = get_sprite(self_value) else {
-        warn!(target: "rgss", "sprite_set_bitmap: get_sprite returned None for self={:#x}", self_value);
         return value;
     };
     if value == rb_sys::Qnil as VALUE {
@@ -426,15 +466,16 @@ unsafe extern "C" fn sprite_set_bitmap(
         native::sprite::set_bitmap(sprite.handle, None);
     } else if is_bitmap(value) {
         let handle = bitmap_handle(value);
-        if handle.is_none() {
-            warn!(target: "rgss", "sprite_set_bitmap: Bitmap handle is None (disposed?)");
-        }
         sprite.bitmap = value;
-        warn!(target: "rgss", "sprite_set_bitmap: stored bitmap VALUE={:#x}", value);
         native::sprite::set_bitmap(sprite.handle, handle);
-    } else {
-        warn!(target: "rgss", "sprite_set_bitmap: rejected non-Bitmap, class={}", name);
     }
+    // Note: RGSS spec says src_rect auto-resets to bitmap dimensions on
+    // bitmap=. PE 21.1 (designed for mkxp-z 2.4.2) does NOT rely on that —
+    // it sets src_rect explicitly when it wants a sub-region (handle=706 in
+    // intro), and leaves it untouched when sprites should render nothing
+    // (handle=41 in load screen). Auto-resetting here makes the latter case
+    // show the entire charset (4×4 grid of frames). The renderer's existing
+    // `src_rect.w == 0` early-exit handles the "no src_rect set" case.
     value
 }
 

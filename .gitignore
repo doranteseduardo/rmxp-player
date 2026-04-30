@@ -28,3 +28,5 @@ src-tauri/target/
 src-tauri/gen/
 **/*.rs.bk
 /target/debug
+/target/release
+/target/release

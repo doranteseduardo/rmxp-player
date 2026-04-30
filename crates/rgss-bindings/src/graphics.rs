@@ -417,6 +417,10 @@ unsafe extern "C" fn graphics_update(_argc: c_int, _argv: *const VALUE, _self: V
     if HANGUP_REQUESTED.swap(false, Ordering::SeqCst) {
         raise_hangup();
     }
+    // Push Ruby-side mutations (e.g. `sprite.src_rect.set(...)`) into native
+    // before the renderer takes its snapshot. Without this, in-place Rect/
+    // Color/Tone mutations don't reach the GPU and animations show all frames.
+    crate::classes::sprite::sync_all_to_native();
     if let Err(err) = runtime::yield_frame() {
         warn!(target: "rgss", error = %err, "Graphics.update yield failed");
     }

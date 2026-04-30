@@ -271,3 +271,19 @@ pub fn rect_data(value: VALUE) -> Option<RectData> {
         height: rect.height,
     })
 }
+
+/// Mutate the existing Rect in-place. Used when an owner (Sprite) wants to
+/// reset its src_rect without breaking external references — `@cached =
+/// sprite.src_rect; sprite.bitmap = ...; @cached.set(...)` is a real PE
+/// pattern, so replacing the Rect VALUE on bitmap-assign would orphan the
+/// cached reference.
+pub fn rect_set_inplace(value: VALUE, x: i32, y: i32, width: i32, height: i32) -> bool {
+    let Some(rect) = (unsafe { get_typed_data::<RectValue>(value, RECT_TYPE.as_rb_type()) }) else {
+        return false;
+    };
+    rect.x = x;
+    rect.y = y;
+    rect.width = width;
+    rect.height = height;
+    true
+}

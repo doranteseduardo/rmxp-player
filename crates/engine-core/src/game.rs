@@ -81,7 +81,12 @@ impl GameState {
         self.collect_windows(textures, &viewport_map, &default_viewport);
         self.tilemaps.sort_by_key(|tm| tm.z);
         self.planes.sort_by_key(|pl| pl.z);
-        self.sprites.sort_by_key(|sp| sp.z);
+        // Tie-break by creation order so SpriteWindow's 16 component sprites
+        // (back, corners, sides, …, contents) stack in PE's intended order
+        // when they all share the same z. Without this, HashMap-snapshot
+        // iteration is non-deterministic and "back" can render OVER "contents",
+        // hiding the message text.
+        self.sprites.sort_by_key(|sp| (sp.z, sp.creation_order));
         self.windows.sort_by_key(|w| w.z);
     }
 
@@ -171,7 +176,7 @@ impl GameState {
                 scene,
                 camera,
                 clip,
-                z: viewport.z,
+                z: z_key(tilemap.viewport_id, viewport.z, 0),
                 tone,
                 color,
                 opacity: tilemap.opacity.clamp(0, 255) as u8,
@@ -231,7 +236,7 @@ impl GameState {
                 blend_type: plane.blend_type.clamp(0, 2) as u8,
                 tone,
                 color,
-                z: viewport.z.saturating_mul(1000).saturating_add(plane.z),
+                z: z_key(plane.viewport_id, viewport.z, plane.z),
             });
         }
     }
@@ -242,7 +247,7 @@ impl GameState {
         viewports: &HashMap<u32, ViewportInfo>,
         default_viewport: &ViewportInfo,
     ) {
-        for (_id, sprite) in sprite_snapshot() {
+        for (id, sprite) in sprite_snapshot() {
             if sprite.disposed || !sprite.visible {
                 continue;
             }
@@ -282,10 +287,16 @@ impl GameState {
                 viewport.rect.x as f32 + (sprite.x - viewport.ox),
                 viewport.rect.y as f32 + (sprite.y - viewport.oy),
             );
-            let pivot = (
-                sprite.ox as f32 - src_x as f32,
-                sprite.oy as f32 - src_y as f32,
-            );
+            // RGSS convention: ox/oy is the origin offset *within the source
+            // rectangle*, not the entire bitmap. So bitmap pixel
+            // (src_left + ox, src_top + oy) is anchored at (sprite.x,
+            // sprite.y) on screen. The renderer's per-pixel formula expects
+            // pivot = (ox, oy) so that:
+            //   src_x = src_left + pivot_x + (dest_x - pos_x)
+            //         = src_left + ox + (dest_x - pos_x)
+            // Subtracting src_x here would double-count and shift each
+            // animation frame on screen by its src_rect.x.
+            let pivot = (sprite.ox as f32, sprite.oy as f32);
             let tone = combine_tone(
                 [
                     sprite.tone.red,
@@ -323,7 +334,8 @@ impl GameState {
                 origin: pivot,
                 position,
                 opacity: sprite.opacity.clamp(0, 255) as u8,
-                z: viewport.z.saturating_mul(1000).saturating_add(sprite.z),
+                z: z_key(sprite.viewport_id, viewport.z, sprite.z),
+                creation_order: id,
                 scale: (sprite.zoom_x, sprite.zoom_y),
                 angle: sprite.angle,
                 mirror: sprite.mirror,
@@ -427,7 +439,7 @@ impl GameState {
                 color,
                 cursor_rect,
                 cursor_active: window.active || window.pause,
-                z: viewport.z.saturating_mul(1000).saturating_add(window.z),
+                z: z_key(window.viewport_id, viewport.z, window.z),
             });
         }
     }
@@ -554,6 +566,40 @@ fn combine_color(mut color: [f32; 4], viewport: &ViewportInfo) -> [f32; 4] {
     color[2] = clamp_color_channel(color[2] + viewport.color[2]);
     color[3] = clamp_color_channel(color[3] + viewport.color[3]);
     color
+}
+
+/// Combine viewport.z and sprite.z into a single sortable i64 key.
+///
+/// In RGSS, `Viewport.z` is the **primary** sort key — a sprite in a
+/// high-z viewport is always above one in a low-z viewport, regardless of
+/// the sprite's own z. The sprite's `z` is only the tie-breaker within the
+/// same viewport.
+///
+/// PE uses `sprite.z = 99999` for message windows, far higher than the
+/// 0–999 range our previous `viewport.z * 1000 + sprite.z` formula
+/// assumed, which caused message windows in viewport.z=0 to sort below
+/// scene pictures in viewport.z=200.
+///
+/// MULT = 1,000,000 keeps `viewport.z` strictly dominant for any
+/// realistic sprite.z (PE max ≈ 99999, well under 1M).
+fn combined_z(primary: i32, secondary: i32) -> i64 {
+    const MULT: i64 = 1_000_000;
+    (primary as i64) * MULT + (secondary as i64)
+}
+
+/// Compute the sort key for a sprite/plane/window given its viewport.
+///
+/// `viewport_id`: None if the sprite has no viewport (RGSS allows this
+/// — drawn directly to the screen). When None, RGSS uses `sprite.z`
+/// directly as the global sort key — equivalent to "viewport.z =
+/// sprite.z" in our combined formulation.
+fn z_key(viewport_id: Option<u32>, viewport_z: i32, sprite_z: i32) -> i64 {
+    if viewport_id.is_some() {
+        combined_z(viewport_z, sprite_z)
+    } else {
+        // Viewport-less sprite: its own z is the primary global ordering.
+        combined_z(sprite_z, 0)
+    }
 }
 
 fn clamp_tone_channel(value: f32) -> f32 {

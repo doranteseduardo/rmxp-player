@@ -16,66 +16,30 @@ struct SkinRect {
     h: u32,
 }
 
+// RPG Maker XP windowskin layout (192x128). The skin is split into:
+//   (0,   0, 128, 128) — tiled background fill
+//   (128, 0,  64,  64) — frame: corners (16x16) + edges (32x16 / 16x32)
+//   (128, 64, 32,  32) — selection cursor (single frame, not animated)
 const WINDOW_BG_SRC: SkinRect = SkinRect {
     x: 0,
     y: 0,
-    w: 64,
-    h: 64,
+    w: 128,
+    h: 128,
 };
 const WINDOW_CORNER_SRC: [SkinRect; 4] = [
-    SkinRect {
-        x: 64,
-        y: 0,
-        w: 16,
-        h: 16,
-    },
-    SkinRect {
-        x: 112,
-        y: 0,
-        w: 16,
-        h: 16,
-    },
-    SkinRect {
-        x: 64,
-        y: 48,
-        w: 16,
-        h: 16,
-    },
-    SkinRect {
-        x: 112,
-        y: 48,
-        w: 16,
-        h: 16,
-    },
+    SkinRect { x: 128, y: 0,  w: 16, h: 16 }, // top-left
+    SkinRect { x: 176, y: 0,  w: 16, h: 16 }, // top-right
+    SkinRect { x: 128, y: 48, w: 16, h: 16 }, // bottom-left
+    SkinRect { x: 176, y: 48, w: 16, h: 16 }, // bottom-right
 ];
 const WINDOW_EDGE_SRC: [SkinRect; 4] = [
-    SkinRect {
-        x: 80,
-        y: 0,
-        w: 32,
-        h: 16,
-    }, // top
-    SkinRect {
-        x: 80,
-        y: 48,
-        w: 32,
-        h: 16,
-    }, // bottom
-    SkinRect {
-        x: 64,
-        y: 16,
-        w: 16,
-        h: 32,
-    }, // left
-    SkinRect {
-        x: 112,
-        y: 16,
-        w: 16,
-        h: 32,
-    }, // right
+    SkinRect { x: 144, y: 0,  w: 32, h: 16 }, // top
+    SkinRect { x: 144, y: 48, w: 32, h: 16 }, // bottom
+    SkinRect { x: 128, y: 16, w: 16, h: 32 }, // left
+    SkinRect { x: 176, y: 16, w: 16, h: 32 }, // right
 ];
 const WINDOW_CURSOR_SRC: SkinRect = SkinRect {
-    x: 64,
+    x: 128,
     y: 64,
     w: 32,
     h: 32,
@@ -85,6 +49,38 @@ const FLASH_ALPHA: [u8; 32] = [
     0x3C, 0x3C, 0x3C, 0x3C, 0x4B, 0x4B, 0x4B, 0x4B, 0x5A, 0x5A, 0x5A, 0x5A, 0x69, 0x69, 0x69, 0x69,
     0x78, 0x78, 0x78, 0x78, 0x69, 0x69, 0x69, 0x69, 0x5A, 0x5A, 0x5A, 0x5A, 0x4B, 0x4B, 0x4B, 0x4B,
 ];
+
+struct RenderProfile {
+    frames: u32,
+    total: std::time::Duration,
+    clear: std::time::Duration,
+    tile: std::time::Duration,
+    planes: std::time::Duration,
+    sprites: std::time::Duration,
+    windows: std::time::Duration,
+    present: std::time::Duration,
+    sprite_count_max: usize,
+    window_count_max: usize,
+    window_start: std::time::Instant,
+}
+
+impl Default for RenderProfile {
+    fn default() -> Self {
+        Self {
+            frames: 0,
+            total: std::time::Duration::ZERO,
+            clear: std::time::Duration::ZERO,
+            tile: std::time::Duration::ZERO,
+            planes: std::time::Duration::ZERO,
+            sprites: std::time::Duration::ZERO,
+            windows: std::time::Duration::ZERO,
+            present: std::time::Duration::ZERO,
+            sprite_count_max: 0,
+            window_count_max: 0,
+            window_start: std::time::Instant::now(),
+        }
+    }
+}
 
 /// Basic renderer responsible for presenting frames using `pixels`.
 pub struct Renderer<'a> {
@@ -133,7 +129,11 @@ pub struct SpriteInstance {
     pub origin: (f32, f32),
     pub position: (f32, f32),
     pub opacity: u8,
-    pub z: i32,
+    pub z: i64,
+    /// Native handle id — used as the secondary sort key when two sprites
+    /// share the same `z`. RGSS expects ties to break by creation order
+    /// (later-created on top); higher handle = created later.
+    pub creation_order: u32,
     pub scale: (f32, f32),
     pub angle: f32,
     pub mirror: bool,
@@ -152,7 +152,7 @@ pub struct TilemapInstance {
     pub scene: TileScene,
     pub camera: Camera,
     pub clip: ClipRect,
-    pub z: i32,
+    pub z: i64,
     pub tone: [f32; 4],
     pub color: [f32; 4],
     pub opacity: u8,
@@ -169,7 +169,7 @@ pub struct PlaneInstance {
     pub blend_type: u8,
     pub tone: [f32; 4],
     pub color: [f32; 4],
-    pub z: i32,
+    pub z: i64,
 }
 
 #[derive(Clone)]
@@ -187,7 +187,7 @@ pub struct WindowInstance {
     pub color: [f32; 4],
     pub cursor_rect: Option<ClipRect>,
     pub cursor_active: bool,
-    pub z: i32,
+    pub z: i64,
 }
 
 impl ClipRect {
@@ -377,9 +377,21 @@ impl<'a> Renderer<'a> {
     }
 
     pub fn render(&mut self, frame_index: u64, frame_data: Option<RenderFrame<'_>>) -> Result<()> {
+        use std::time::Instant;
+        let t0 = Instant::now();
         let frame = self.pixels.frame_mut();
         clear_frame(frame);
+        let t_clear = t0.elapsed();
+        let mut t_tile = std::time::Duration::ZERO;
+        let mut t_planes = std::time::Duration::ZERO;
+        let mut t_sprites = std::time::Duration::ZERO;
+        let mut t_windows = std::time::Duration::ZERO;
+        let mut sprite_count = 0usize;
+        let mut window_count = 0usize;
         if let Some(data) = frame_data {
+            sprite_count = data.sprites.len();
+            window_count = data.windows.len();
+            let t1 = Instant::now();
             if data.tilemaps.is_empty() {
                 if let Some(fallback) = data.fallback {
                     draw_tile_scene(
@@ -391,22 +403,69 @@ impl<'a> Renderer<'a> {
                         frame_index,
                     );
                     draw_sprites(self.logical_size, frame, fallback.sprites);
-                } else {
-                    draw_gradient(self.logical_size, frame, frame_index);
                 }
             } else {
                 draw_tilemaps(self.logical_size, frame, data.tilemaps, frame_index);
             }
+            t_tile = t1.elapsed();
+            let t2 = Instant::now();
             draw_planes(self.logical_size, frame, data.planes);
-            draw_sprites(self.logical_size, frame, data.sprites);
-            draw_windows(self.logical_size, frame, data.windows);
-        } else {
-            draw_gradient(self.logical_size, frame, frame_index);
+            t_planes = t2.elapsed();
+            // Original ordering: sprites first, windows always on top.
+            // Z-merging sprites and windows hid PE's panels behind high-z
+            // sprites; revert until we have a more nuanced model.
+            let ts = Instant::now();
+            for sprite in data.sprites {
+                draw_sprite(self.logical_size, frame, sprite);
+            }
+            t_sprites = ts.elapsed();
+            let tw = Instant::now();
+            for window in data.windows {
+                draw_window(self.logical_size, frame, window);
+            }
+            t_windows = tw.elapsed();
         }
+        let t4 = Instant::now();
         let effects = screen_effects();
         apply_screen_effects(self.logical_size, frame, &effects);
         capture_backbuffer(self.logical_size, frame);
         self.pixels.render()?;
+        let t_present = t4.elapsed();
+        let total = t0.elapsed();
+        // Aggregate timings and dump every second.
+        thread_local! {
+            static PROFILE: std::cell::RefCell<RenderProfile> = std::cell::RefCell::new(RenderProfile::default());
+        }
+        PROFILE.with(|p| {
+            let mut p = p.borrow_mut();
+            p.frames += 1;
+            p.total += total;
+            p.clear += t_clear;
+            p.tile += t_tile;
+            p.planes += t_planes;
+            p.sprites += t_sprites;
+            p.windows += t_windows;
+            p.present += t_present;
+            p.sprite_count_max = p.sprite_count_max.max(sprite_count);
+            p.window_count_max = p.window_count_max.max(window_count);
+            if p.window_start.elapsed() >= std::time::Duration::from_secs(1) {
+                let n = p.frames.max(1) as f64;
+                eprintln!(
+                    "[render-prof] {} frames | per-frame avg: total={:.2}ms clear={:.2} tile={:.2} planes={:.2} sprites={:.2}({} max) windows={:.2}({} max) present={:.2}",
+                    p.frames,
+                    p.total.as_secs_f64() * 1000.0 / n,
+                    p.clear.as_secs_f64() * 1000.0 / n,
+                    p.tile.as_secs_f64() * 1000.0 / n,
+                    p.planes.as_secs_f64() * 1000.0 / n,
+                    p.sprites.as_secs_f64() * 1000.0 / n,
+                    p.sprite_count_max,
+                    p.windows.as_secs_f64() * 1000.0 / n,
+                    p.window_count_max,
+                    p.present.as_secs_f64() * 1000.0 / n,
+                );
+                *p = RenderProfile::default();
+            }
+        });
         Ok(())
     }
 }
@@ -660,7 +719,16 @@ fn blend_pixel(dst: &mut [u8; 4], src: [u8; 4]) {
     dst[3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
 }
 
+#[inline(always)]
+fn tone_color_identity(tone: &[f32; 4], overlay: &[f32; 4]) -> bool {
+    tone[0] == 0.0 && tone[1] == 0.0 && tone[2] == 0.0 && tone[3] == 0.0 && overlay[3] == 0.0
+}
+
+#[inline]
 fn apply_tone_and_color(mut color: [u8; 4], tone: &[f32; 4], overlay: &[f32; 4]) -> [u8; 4] {
+    if tone_color_identity(tone, overlay) {
+        return color;
+    }
     let mut r = (color[0] as f32 + tone[0]).clamp(0.0, 255.0);
     let mut g = (color[1] as f32 + tone[1]).clamp(0.0, 255.0);
     let mut b = (color[2] as f32 + tone[2]).clamp(0.0, 255.0);
@@ -765,6 +833,20 @@ fn draw_sprite(size: (u32, u32), frame: &mut [u8], sprite: &SpriteInstance) {
     }
     let tex_width = sprite.texture.width();
     let tex_height = sprite.texture.height();
+
+    // Fast path: 1:1 axis-aligned blit. Covers the vast majority of sprites
+    // (UI icons, text glyphs, character frames) — no rotation, scale==1,
+    // no mirror, normal alpha blend, no flash. Replaces the per-pixel
+    // cos/sin/scale math with direct slice indexing and saves ~10x.
+    let no_rotation = sprite.angle == 0.0;
+    let unit_scale = (sprite.scale.0 == 1.0 || sprite.scale.0.abs() < 1.0e-3)
+        && (sprite.scale.1 == 1.0 || sprite.scale.1.abs() < 1.0e-3);
+    let no_flash = sprite.flash_color.is_none();
+    if no_rotation && unit_scale && !sprite.mirror && sprite.blend_type == 0 && no_flash {
+        draw_sprite_fast(size, frame, sprite, &clip, tex_width, tex_height);
+        return;
+    }
+
     let src_left = sprite.src_rect.0 as f32;
     let src_top = sprite.src_rect.1 as f32;
     let src_right = src_left + sprite.src_rect.2 as f32;
@@ -842,6 +924,87 @@ fn draw_sprite(size: (u32, u32), frame: &mut [u8], sprite: &SpriteInstance) {
             let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];
             blend_with_mode(&mut dst, color, sprite.blend_type);
             frame[idx..idx + 4].copy_from_slice(&dst);
+        }
+    }
+}
+
+/// Optimized 1:1 axis-aligned alpha-blend blit. Dest rect = src rect.
+/// Skips f32 trig/scale math, fetches texels via direct slice indexing on
+/// the underlying RgbaImage buffer, short-circuits identity tone/color.
+fn draw_sprite_fast(
+    size: (u32, u32),
+    frame: &mut [u8],
+    sprite: &SpriteInstance,
+    clip: &ClipRect,
+    tex_width: u32,
+    tex_height: u32,
+) {
+    let src_left = sprite.src_rect.0 as i32;
+    let src_top = sprite.src_rect.1 as i32;
+    let pivot_x = sprite.origin.0 as i32;
+    let pivot_y = sprite.origin.1 as i32;
+    let pos_x = sprite.position.0 as i32;
+    let pos_y = sprite.position.1 as i32;
+    let identity_tint = tone_color_identity(&sprite.tone, &sprite.color);
+    let raw = sprite.texture.as_raw();
+    let frame_w = size.0 as usize;
+
+    for y in 0..clip.height {
+        let dest_y = clip.y + y as i32;
+        let local_y = dest_y - pos_y;
+        let src_y = src_top + pivot_y + local_y;
+        if src_y < src_top || src_y >= src_top + sprite.src_rect.3 as i32 {
+            continue;
+        }
+        if src_y < 0 || src_y >= tex_height as i32 {
+            continue;
+        }
+        let row_base = (src_y as usize) * (tex_width as usize) * 4;
+        let dest_row_base = (dest_y as usize) * frame_w * 4;
+        for x in 0..clip.width {
+            let dest_x = clip.x + x as i32;
+            let local_x = dest_x - pos_x;
+            let src_x = src_left + pivot_x + local_x;
+            if src_x < src_left || src_x >= src_left + sprite.src_rect.2 as i32 {
+                continue;
+            }
+            if src_x < 0 || src_x >= tex_width as i32 {
+                continue;
+            }
+            let src_off = row_base + (src_x as usize) * 4;
+            let mut color = [
+                raw[src_off],
+                raw[src_off + 1],
+                raw[src_off + 2],
+                raw[src_off + 3],
+            ];
+            if color[3] == 0 {
+                continue;
+            }
+            if sprite.opacity < 255 {
+                color[3] = ((color[3] as u16 * sprite.opacity as u16) / 255) as u8;
+            }
+            if sprite.bush_depth > 0 {
+                let local_y_px = src_y - src_top;
+                if local_y_px >= sprite.src_rect.3 as i32 - sprite.bush_depth as i32 {
+                    color[3] = ((color[3] as u16 * sprite.bush_opacity as u16) / 255) as u8;
+                }
+            }
+            if !identity_tint {
+                color = apply_tone_and_color(color, &sprite.tone, &sprite.color);
+            }
+            // Standard alpha blend (blend_type 0).
+            let dst_off = dest_row_base + (dest_x as usize) * 4;
+            let alpha = color[3] as u16;
+            if alpha == 255 {
+                frame[dst_off..dst_off + 4].copy_from_slice(&color);
+            } else {
+                let inv = 255 - alpha;
+                frame[dst_off] = ((color[0] as u16 * alpha + frame[dst_off] as u16 * inv) / 255) as u8;
+                frame[dst_off + 1] = ((color[1] as u16 * alpha + frame[dst_off + 1] as u16 * inv) / 255) as u8;
+                frame[dst_off + 2] = ((color[2] as u16 * alpha + frame[dst_off + 2] as u16 * inv) / 255) as u8;
+                frame[dst_off + 3] = frame[dst_off + 3].max(color[3]);
+            }
         }
     }
 }
@@ -1031,7 +1194,7 @@ fn draw_window_frame(
             opacity,
         );
     }
-    // Edges: top, bottom, left, right
+    // Edges: top, bottom, left, right — TILED across the dest rect (not stretched).
     let horizontal_width = full_rect.width.saturating_sub((WINDOW_PADDING * 2) as u32);
     if horizontal_width > 0 {
         let top = ClipRect::new(
@@ -1046,27 +1209,13 @@ fn draw_window_frame(
             horizontal_width,
             corner_h,
         );
-        draw_windowskin_patch(
-            skin,
-            WINDOW_EDGE_SRC[0],
-            &top,
-            visible,
-            size,
-            frame,
-            &window.tone,
-            &window.color,
-            opacity,
+        draw_windowskin_tile(
+            skin, WINDOW_EDGE_SRC[0], &top, visible, size, frame,
+            &window.tone, &window.color, opacity,
         );
-        draw_windowskin_patch(
-            skin,
-            WINDOW_EDGE_SRC[1],
-            &bottom,
-            visible,
-            size,
-            frame,
-            &window.tone,
-            &window.color,
-            opacity,
+        draw_windowskin_tile(
+            skin, WINDOW_EDGE_SRC[1], &bottom, visible, size, frame,
+            &window.tone, &window.color, opacity,
         );
     }
     let vertical_height = full_rect.height.saturating_sub((WINDOW_PADDING * 2) as u32);
@@ -1083,28 +1232,56 @@ fn draw_window_frame(
             corner_w,
             vertical_height,
         );
-        draw_windowskin_patch(
-            skin,
-            WINDOW_EDGE_SRC[2],
-            &left,
-            visible,
-            size,
-            frame,
-            &window.tone,
-            &window.color,
-            opacity,
+        draw_windowskin_tile(
+            skin, WINDOW_EDGE_SRC[2], &left, visible, size, frame,
+            &window.tone, &window.color, opacity,
         );
-        draw_windowskin_patch(
-            skin,
-            WINDOW_EDGE_SRC[3],
-            &right,
-            visible,
-            size,
-            frame,
-            &window.tone,
-            &window.color,
-            opacity,
+        draw_windowskin_tile(
+            skin, WINDOW_EDGE_SRC[3], &right, visible, size, frame,
+            &window.tone, &window.color, opacity,
         );
+    }
+}
+
+fn draw_windowskin_tile(
+    skin: &RgbaImage,
+    src: SkinRect,
+    dest: &ClipRect,
+    visible: &ClipRect,
+    size: (u32, u32),
+    frame: &mut [u8],
+    tone: &[f32; 4],
+    color: &[f32; 4],
+    opacity: u8,
+) {
+    if src.w == 0 || src.h == 0 || dest.width == 0 || dest.height == 0 || opacity == 0 {
+        return;
+    }
+    if skin.width() < src.x + src.w || skin.height() < src.y + src.h {
+        return;
+    }
+    let Some(target) = dest.intersect(visible).and_then(|r| r.clamp(size)) else {
+        return;
+    };
+    for y in 0..target.height {
+        let dest_y = target.y + y as i32;
+        let local_y = (dest_y - dest.y).rem_euclid(src.h as i32) as u32;
+        let ty = src.y + local_y;
+        for x in 0..target.width {
+            let dest_x = target.x + x as i32;
+            let local_x = (dest_x - dest.x).rem_euclid(src.w as i32) as u32;
+            let tx = src.x + local_x;
+            let mut sample = skin.get_pixel(tx, ty).0;
+            if sample[3] == 0 {
+                continue;
+            }
+            sample[3] = ((sample[3] as u16 * opacity as u16) / 255) as u8;
+            sample = apply_tone_and_color(sample, tone, color);
+            let idx = (dest_y as usize * size.0 as usize + dest_x as usize) * 4;
+            let mut dst = [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]];
+            blend_pixel(&mut dst, sample);
+            frame[idx..idx + 4].copy_from_slice(&dst);
+        }
     }
 }
 

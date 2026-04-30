@@ -4,7 +4,7 @@ pub mod common;
 mod font;
 mod plane;
 mod rect;
-mod sprite;
+pub mod sprite;
 mod table;
 mod tilemap;
 mod tone;
