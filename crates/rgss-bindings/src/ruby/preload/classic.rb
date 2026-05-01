@@ -46,6 +46,43 @@ rescue
   srand(Process.pid)
 end
 
+# Self-heal a stuck @message_waiting=true on the map interpreter. We've
+# observed (Oak intro path in PE 21.1) that on the first observed
+# Interpreter#update the flag is already true even though no message window
+# exists and pbMessage was never reached. Without recovery, the interpreter
+# returns at line 104 of update on every frame and the autorun never
+# advances past the first Show Text.
+#
+# Recovery rule: clear @message_waiting only when no message window is
+# actually showing (pbCreateMessageWindow sets $game_temp.message_window_showing
+# and pbDisposeMessageWindow clears it). With a real message window up, leave
+# the flag alone so legit pbMessage waits keep working.
+#
+# Root cause is open — see SESSION_PROGRESS.md. This is a band-aid.
+module InterpreterMessageWaitingRecovery
+  def update
+    if @message_waiting
+      gt = (defined?($game_temp) ? $game_temp : nil)
+      showing = gt && gt.respond_to?(:message_window_showing) && gt.message_window_showing
+      @message_waiting = false unless showing
+    end
+    super
+  end
+end
+
+TracePoint.new(:end) do |tp|
+  begin
+    s = tp.self
+    next unless s.is_a?(Module) && s.name == 'Interpreter'
+    next unless s.method_defined?(:update) && s.method_defined?(:command_101)
+    next if s.include?(InterpreterMessageWaitingRecovery)
+    s.prepend(InterpreterMessageWaitingRecovery)
+  rescue
+    # never break script load
+  end
+end.enable
+
+
 class Array
   unless method_defined?(:sample)
     def sample(n = nil)
