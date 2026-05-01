@@ -36,6 +36,107 @@ rescue LoadError
 end
 
 module RGSS
+  # Walks a freshly-deserialized object graph and converts ASCII-8BIT strings
+  # to UTF-8. Legacy RPG Maker XP rxdata was saved by Ruby 1.8 without
+  # encoding tags, so MRI 3.x labels every string ASCII-8BIT. PE's text
+  # processing then byte-iterates ("é" UTF-8 0xC3 0xA9 splits into Ã + ©).
+  # Forcing UTF-8 once at load time is far less invasive than patching every
+  # downstream `scan(/./m)` / slice / draw_text path.
+  @@__rgss_fix_count = 0
+  @@__rgss_fix_logged = false
+
+  def self.__rgss_count_ascii8bit(root, seen = nil, sample = nil)
+    seen ||= {}.compare_by_identity
+    sample ||= []
+    return 0 if seen.key?(root)
+    case root
+    when String
+      seen[root] = true
+      return 0 unless root.encoding == Encoding::ASCII_8BIT
+      if sample.length < 3 && root.bytes.any? { |b| b >= 0x80 }
+        sample << root.bytes.first(20).map { |b| format('%02x', b) }.join(' ')
+      end
+      1
+    when Array
+      seen[root] = true
+      n = root.sum { |e| __rgss_count_ascii8bit(e, seen, sample) }
+      if root.equal?(seen.keys.first) && !sample.empty?
+        $stderr.puts "[remaining-sample] #{sample.join(' | ')}"
+      end
+      n
+    when Hash
+      seen[root] = true
+      root.sum { |_k, v| __rgss_count_ascii8bit(v, seen, sample) }
+    else
+      if root.respond_to?(:instance_variables)
+        seen[root] = true
+        root.instance_variables.sum do |iv|
+          __rgss_count_ascii8bit(root.instance_variable_get(iv), seen, sample)
+        end
+      else
+        0
+      end
+    end
+  end
+
+  def self.__rgss_fix_encodings!(root, seen = nil)
+    seen ||= {}.compare_by_identity
+    return root if seen.key?(root)
+    case root
+    when String
+      seen[root] = true
+      if root.encoding == Encoding::ASCII_8BIT
+        if !@@__rgss_fix_logged && root.bytes.any? { |b| b >= 0x80 }
+          @@__rgss_fix_logged = true
+          $stderr.puts "[fix-enc] sample ASCII_8BIT string: #{root.bytes.first(20).map { |b| format('%02x', b) }.join(' ')} frozen=#{root.frozen?}"
+        end
+        @@__rgss_fix_count += 1
+        before_enc = root.encoding.name
+        utf8_view = root.dup.force_encoding(Encoding::UTF_8)
+        if utf8_view.valid_encoding?
+          root.force_encoding(Encoding::UTF_8) rescue nil
+          if root.encoding != Encoding::UTF_8 && @@__rgss_fix_count <= 5
+            $stderr.puts "[fix-bug] force_encoding silently failed: still #{root.encoding.name} (frozen=#{root.frozen?})"
+          end
+        else
+          # Fall back to Windows-1252 (Latin-1 superset). Most rxdata strings
+          # written by RPG Maker XP fall in this codepage.
+          begin
+            converted = root.dup
+              .force_encoding(Encoding::WINDOWS_1252)
+              .encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: '?')
+            root.replace(converted)
+          rescue StandardError
+            root.force_encoding(Encoding::UTF_8)
+          end
+        end
+      end
+    when Array
+      seen[root] = true
+      root.each { |e| __rgss_fix_encodings!(e, seen) }
+    when Hash
+      seen[root] = true
+      root.each_pair do |k, v|
+        __rgss_fix_encodings!(k, seen)
+        __rgss_fix_encodings!(v, seen)
+      end
+    else
+      if root.respond_to?(:instance_variables)
+        seen[root] = true
+        root.instance_variables.each do |iv|
+          val = root.instance_variable_get(iv)
+          next if val.equal?(root)
+          fixed = __rgss_fix_encodings!(val, seen)
+          # If the recursive call replaced the value (e.g. converted a String
+          # whose bytes had to be reallocated), nothing to do — String#replace
+          # mutates in place. Other types are mutated in place too.
+          _ = fixed
+        end
+      end
+    end
+    root
+  end
+
   module Runtime
     @pending_suspend = false
     @low_memory = false
@@ -59,6 +160,7 @@ module RGSS
       # (rgss_main { block }) games benefit: Graphics.update -> Fiber.yield
       # yields control to the event loop for rendering without ever blocking it.
       def install_main_from_source(source, label)
+        source.force_encoding(::Encoding::UTF_8) if source.is_a?(::String)
         @main_fiber = Fiber.new do
           begin
             # rubocop:disable Security/Eval
@@ -70,6 +172,18 @@ module RGSS
             @main_fiber = nil
           end
         end
+      end
+
+      # Evaluate a single RGSS script section at top-level with UTF-8
+      # encoding. String literals inside the script will be tagged UTF-8 so
+      # PE's letter-by-letter renderer (which uses scan(/./m)) treats them
+      # as Unicode characters instead of byte-iterating. Without this,
+      # accented characters like é in "Pokémon" get split into Ã + ©.
+      def run_script(source, label)
+        source.force_encoding(::Encoding::UTF_8) if source.is_a?(::String)
+        # rubocop:disable Security/Eval
+        TOPLEVEL_BINDING.eval(source, "(\#{label})", 1)
+        # rubocop:enable Security/Eval
       end
 
       def resume_main
@@ -256,7 +370,16 @@ module Kernel
 
   def load_data(filename)
     path = resolve_rgss_read_path(filename)
-    RGSS::Native.marshal_load(path)
+    obj = RGSS::Native.marshal_load(path)
+    before_count = RGSS.class_variable_get(:@@__rgss_fix_count) rescue 0
+    RGSS.__rgss_fix_encodings!(obj)
+    after_count = RGSS.class_variable_get(:@@__rgss_fix_count) rescue 0
+    diff = after_count - before_count
+    if diff > 0
+      remaining = RGSS.__rgss_count_ascii8bit(obj)
+      $stderr.puts "[fix-enc] #{filename}: fixed #{diff} ASCII-8BIT strings, remaining=#{remaining}"
+    end
+    obj
   end
 
   def save_data(object, filename)

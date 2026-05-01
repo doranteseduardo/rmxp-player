@@ -134,8 +134,21 @@ pub fn init() -> Result<()> {
     Ok(())
 }
 
-unsafe extern "C" fn font_exist_q(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {
-    rb_sys::Qtrue as VALUE
+unsafe extern "C" fn font_exist_q(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qfalse as VALUE;
+    }
+    let mut value = *argv;
+    let ptr = rb_string_value_cstr(&mut value);
+    if ptr.is_null() {
+        return rb_sys::Qfalse as VALUE;
+    }
+    let name = CStr::from_ptr(ptr).to_string_lossy();
+    if crate::native::font::font_exists(&name) {
+        rb_sys::Qtrue as VALUE
+    } else {
+        rb_sys::Qfalse as VALUE
+    }
 }
 
 const fn cstr(bytes: &'static [u8]) -> &'static CStr {

@@ -211,6 +211,7 @@ static STORE: Lazy<Mutex<InputStore>> = Lazy::new(|| Mutex::new(InputStore::defa
 static MOUSE_STATE: Lazy<RwLock<MouseState>> = Lazy::new(|| RwLock::new(MouseState::default()));
 static TEXT_STATE: Lazy<RwLock<TextState>> = Lazy::new(|| RwLock::new(TextState::default()));
 static RAW_KEY_STATES: Lazy<RwLock<[bool; 256]>> = Lazy::new(|| RwLock::new([false; 256]));
+static RAW_KEY_STATES_PREV: Lazy<RwLock<[bool; 256]>> = Lazy::new(|| RwLock::new([false; 256]));
 
 pub const BUTTON_DOWN: ButtonMask = 1 << 0;
 pub const BUTTON_LEFT: ButtonMask = 1 << 1;
@@ -323,6 +324,9 @@ pub fn update_input(snapshot: InputSnapshot) {
         raw_key_states,
     } = snapshot;
     if let Ok(mut states) = RAW_KEY_STATES.write() {
+        if let Ok(mut prev) = RAW_KEY_STATES_PREV.write() {
+            *prev = *states;
+        }
         *states = *raw_key_states;
     }
     if let Ok(mut store) = STORE.lock() {
@@ -392,6 +396,10 @@ unsafe fn define_input() -> Result<()> {
         -1,
     );
     rb_define_module_function(module, c_name(GETS_NAME), Some(input_gets), -1);
+    rb_define_module_function(module, b"pressex?\0".as_ptr() as *const c_char, Some(input_pressex_q), -1);
+    rb_define_module_function(module, b"triggerex?\0".as_ptr() as *const c_char, Some(input_triggerex_q), -1);
+    rb_define_module_function(module, b"repeatex?\0".as_ptr() as *const c_char, Some(input_repeatex_q), -1);
+    rb_define_module_function(module, b"releaseex?\0".as_ptr() as *const c_char, Some(input_releaseex_q), -1);
     rb_define_module_function(module, c_name(CLIPBOARD_NAME), Some(input_clipboard), -1);
     rb_define_module_function(
         module,
@@ -700,6 +708,110 @@ unsafe extern "C" fn input_raw_key_states(
         rb_sys::rb_ary_push(ary, val);
     }
     ary
+}
+
+/// Map a Ruby symbol like :ESCAPE or :A to an SDL scancode, matching the
+/// names mkxp-z's `Input.triggerex?` accepts so PE-style keyboard polling
+/// works (text entry, debug shortcuts, etc.).
+fn symbol_to_scancode(name: &str) -> Option<u8> {
+    let upper = name.to_ascii_uppercase();
+    Some(match upper.as_str() {
+        "ESCAPE" | "ESC" => 0x29,
+        "RETURN" | "ENTER" => 0x28,
+        "BACKSPACE" => 0x2A,
+        "TAB" => 0x2B,
+        "SPACE" => 0x2C,
+        "INSERT" => 0x49,
+        "DELETE" => 0x4C,
+        "HOME" => 0x4A,
+        "END" => 0x4D,
+        "PAGEUP" => 0x4B,
+        "PAGEDOWN" => 0x4E,
+        "UP" => 0x52,
+        "DOWN" => 0x51,
+        "LEFT" => 0x50,
+        "RIGHT" => 0x4F,
+        "F1" => 0x3A, "F2" => 0x3B, "F3" => 0x3C, "F4" => 0x3D,
+        "F5" => 0x3E, "F6" => 0x3F, "F7" => 0x40, "F8" => 0x41,
+        "F9" => 0x42, "F10" => 0x43, "F11" => 0x44, "F12" => 0x45,
+        "LSHIFT" | "SHIFT" => 0xE1, "RSHIFT" => 0xE5,
+        "LCTRL" | "CTRL" => 0xE0, "RCTRL" => 0xE4,
+        "LALT" | "ALT" => 0xE2, "RALT" => 0xE6,
+        "LSUPER" | "SUPER" | "LMETA" | "META" => 0xE3,
+        "RSUPER" | "RMETA" => 0xE7,
+        "MINUS" | "DASH" => 0x2D,
+        "EQUAL" | "EQUALS" => 0x2E,
+        "LBRACKET" => 0x2F, "RBRACKET" => 0x30,
+        "BACKSLASH" => 0x31, "SEMICOLON" => 0x33,
+        "QUOTE" => 0x34, "BACKQUOTE" | "GRAVE" => 0x35,
+        "COMMA" => 0x36, "PERIOD" => 0x37, "SLASH" => 0x38,
+        "CAPSLOCK" => 0x39,
+        s if s.len() == 1 => {
+            let c = s.as_bytes()[0];
+            match c {
+                b'A'..=b'Z' => 0x04 + (c - b'A'),
+                b'1'..=b'9' => 0x1E + (c - b'1'),
+                b'0' => 0x27,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    })
+}
+
+unsafe fn read_symbol_or_string(value: VALUE) -> Option<String> {
+    if value == rb_sys::Qnil as VALUE {
+        return None;
+    }
+    let mut str_val = rb_sys::rb_funcall(value, rb_intern(b"to_s\0".as_ptr() as *const c_char), 0);
+    let ptr = rb_string_value_cstr(&mut str_val);
+    if ptr.is_null() {
+        return None;
+    }
+    Some(std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned())
+}
+
+unsafe fn ex_check(argc: c_int, argv: *const VALUE, mode: ExMode) -> VALUE {
+    if argc <= 0 || argv.is_null() {
+        return rb_sys::Qfalse as VALUE;
+    }
+    let name = match read_symbol_or_string(*argv) {
+        Some(n) => n,
+        None => return rb_sys::Qfalse as VALUE,
+    };
+    let sc = match symbol_to_scancode(&name) {
+        Some(c) => c as usize,
+        None => return rb_sys::Qfalse as VALUE,
+    };
+    let cur = RAW_KEY_STATES.read().map(|s| s[sc]).unwrap_or(false);
+    let prev = RAW_KEY_STATES_PREV.read().map(|s| s[sc]).unwrap_or(false);
+    let hit = match mode {
+        ExMode::Press => cur,
+        ExMode::Trigger => cur && !prev,
+        ExMode::Release => !cur && prev,
+        ExMode::Repeat => cur, // simple stub: same as press; refine if needed
+    };
+    if hit {
+        rb_sys::Qtrue as VALUE
+    } else {
+        rb_sys::Qfalse as VALUE
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ExMode { Press, Trigger, Release, Repeat }
+
+unsafe extern "C" fn input_pressex_q(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    ex_check(argc, argv, ExMode::Press)
+}
+unsafe extern "C" fn input_triggerex_q(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    ex_check(argc, argv, ExMode::Trigger)
+}
+unsafe extern "C" fn input_repeatex_q(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    ex_check(argc, argv, ExMode::Repeat)
+}
+unsafe extern "C" fn input_releaseex_q(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
+    ex_check(argc, argv, ExMode::Release)
 }
 
 unsafe extern "C" fn input_text_input(_argc: c_int, _argv: *const VALUE, _self: VALUE) -> VALUE {

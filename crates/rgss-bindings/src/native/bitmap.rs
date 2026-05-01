@@ -1,4 +1,7 @@
-use super::{module, native_module, value_to_bool, ColorData, HandleStore, RectData};
+use super::{
+    font::{self, FontSpec},
+    module, native_module, value_to_bool, ColorData, HandleStore, RectData,
+};
 use crate::fs;
 use anyhow::{Context, Result};
 use font8x8::legacy::BASIC_LEGACY;
@@ -220,18 +223,25 @@ pub fn stretch_blt(
     }
 }
 
-pub fn draw_text(
-    id: u32,
-    rect: RectData,
-    text: &str,
-    align: i32,
-    font_size: i32,
-    color: ColorData,
-) {
-    let font_size = font_size.max(6);
-    let color = color_to_rgba(color);
+/// Read a Ruby C-string. RPG Maker XP rxdata frequently produces strings in
+/// Windows-1252 (Latin-1 superset), so when the bytes aren't valid UTF-8 we
+/// decode each byte as a Unicode codepoint (Latin-1 == U+0000..U+00FF) — that
+/// way "Pokémon" with the legacy 0xE9 byte ends up as a real é instead of
+/// `\u{FFFD}`.
+fn read_ruby_text(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+    let bytes = unsafe { CStr::from_ptr(ptr) }.to_bytes();
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => bytes.iter().map(|&b| b as char).collect(),
+    }
+}
+
+pub fn draw_text(id: u32, rect: RectData, text: &str, align: i32, spec: &FontSpec) {
     let _ = with_bitmap_mut(id, |image| {
-        draw_text_run(
+        font::draw_text(
             image,
             rect.x,
             rect.y,
@@ -239,14 +249,30 @@ pub fn draw_text(
             rect.height,
             text,
             align,
-            font_size,
-            color,
+            spec,
         );
     });
 }
 
-pub fn text_size(font_size: i32, text: &str) -> (i32, i32) {
-    measure_text(text, font_size.max(6))
+pub fn text_size(text: &str, spec: &FontSpec) -> (i32, i32) {
+    font::measure(text, spec)
+}
+
+/// Legacy 8x8 raster path used by [`crate::native::font`] only when no real
+/// font file is available. Kept around so the screen never looks empty when a
+/// project ships without a Fonts/ directory.
+pub(crate) fn draw_text_fallback(
+    image: &mut RgbaImage,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    text: &str,
+    align: i32,
+    font_size: i32,
+    color: Rgba<u8>,
+) {
+    draw_text_run(image, x, y, width, height, text, align, font_size.max(6), color);
 }
 
 pub fn set_pixel(id: u32, x: i32, y: i32, color: ColorData) {
@@ -763,26 +789,27 @@ unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, _self: VA
     if text_ptr.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let text = unsafe { CStr::from_ptr(text_ptr) }
-        .to_string_lossy()
-        .to_string();
+    let text = read_ruby_text(text_ptr);
     let align = rb_num2int(args[6]) as i32;
     let font_size = rb_num2int(args[7]) as i32;
     let font_size = font_size.max(6);
     let color = unpack_color(rb_num2uint(args[8]) as u32);
-    draw_text(
-        id,
-        RectData::new(x, y, width, height),
-        &text,
-        align,
-        font_size,
-        ColorData::new(
-            color.0[0] as f32,
-            color.0[1] as f32,
-            color.0[2] as f32,
-            color.0[3] as f32,
-        ),
+    let color = ColorData::new(
+        color.0[0] as f32,
+        color.0[1] as f32,
+        color.0[2] as f32,
+        color.0[3] as f32,
     );
+    let spec = FontSpec {
+        names: Vec::new(),
+        size: font_size,
+        bold: false,
+        italic: false,
+        shadow: false,
+        color,
+        shadow_color: None,
+    };
+    draw_text(id, RectData::new(x, y, width, height), &text, align, &spec);
     rb_sys::Qnil as VALUE
 }
 
@@ -797,8 +824,17 @@ unsafe extern "C" fn bitmap_text_size(argc: c_int, argv: *const VALUE, _self: VA
     if text_ptr.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let text = CStr::from_ptr(text_ptr).to_string_lossy().to_string();
-    let (width, height) = text_size(font_size, &text);
+    let text = read_ruby_text(text_ptr);
+    let spec = FontSpec {
+        names: Vec::new(),
+        size: font_size,
+        bold: false,
+        italic: false,
+        shadow: false,
+        color: ColorData::new(255.0, 255.0, 255.0, 255.0),
+        shadow_color: None,
+    };
+    let (width, height) = text_size(&text, &spec);
     let array = rb_sys::rb_ary_new();
     rb_sys::rb_ary_push(array, int_to_value(width as i64));
     rb_sys::rb_ary_push(array, int_to_value(height as i64));

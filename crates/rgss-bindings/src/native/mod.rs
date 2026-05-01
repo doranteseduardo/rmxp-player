@@ -1,4 +1,5 @@
 pub(crate) mod bitmap;
+pub(crate) mod font;
 mod handles;
 pub(crate) mod interpreter;
 mod module;

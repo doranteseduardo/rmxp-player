@@ -146,6 +146,18 @@ fn font_info(data: &BitmapValue) -> FontSnapshot {
     })
 }
 
+fn font_spec(info: &FontSnapshot) -> crate::native::font::FontSpec {
+    crate::native::font::FontSpec {
+        names: info.names.clone(),
+        size: info.size,
+        bold: info.bold,
+        italic: info.italic,
+        shadow: info.shadow,
+        color: info.color,
+        shadow_color: None,
+    }
+}
+
 unsafe extern "C" fn bitmap_initialize(
     argc: c_int,
     argv: *const VALUE,
@@ -396,8 +408,9 @@ unsafe extern "C" fn bitmap_text_size(
     let Some(data) = get_bitmap(self_value) else {
         return rect::new_rect(0, 0, 0, 0);
     };
-    let font_info = font_info(data);
-    let (width, height) = native::bitmap::text_size(font_info.size, &text);
+    let info = font_info(data);
+    let spec = font_spec(&info);
+    let (width, height) = native::bitmap::text_size(&text, &spec);
     rect::new_rect(0, 0, width, height)
 }
 
@@ -411,7 +424,8 @@ unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, self_valu
         return rb_sys::Qnil as VALUE;
     };
     let info = font_info(data);
-    native::bitmap::draw_text(data.handle, rect, &text, align, info.size, info.color);
+    let spec = font_spec(&info);
+    native::bitmap::draw_text(data.handle, rect, &text, align, &spec);
     rb_sys::Qnil as VALUE
 }
 
@@ -634,7 +648,15 @@ fn value_to_string(value: VALUE) -> String {
     unsafe {
         let mut coerced = rb_obj_as_string(value);
         let ptr = rb_string_value_cstr(&mut coerced);
-        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+        if ptr.is_null() {
+            return String::new();
+        }
+        let bytes = CStr::from_ptr(ptr).to_bytes();
+        if let Ok(s) = std::str::from_utf8(bytes) {
+            return s.to_string();
+        }
+        // Fallback: legacy RGSS rxdata strings are usually Windows-1252.
+        bytes.iter().map(|&b| b as char).collect()
     }
 }
 

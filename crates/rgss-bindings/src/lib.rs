@@ -380,11 +380,29 @@ fn eval_section(section: &ScriptSection<'_>) -> Result<()> {
     let label = script_label(section);
     debug!(target: "rgss", id = section.id, name = %label, "Evaluating script");
     let _guard = ScriptLabelGuard::push(&label);
-    let script = CString::new(section.source.as_bytes())
-        .map_err(|_| anyhow!("script {label} contains interior null byte"))?;
+    if section.source.contains('\0') {
+        return Err(anyhow!("script {label} contains interior null byte"));
+    }
+    // Stash the source + label as UTF-8 Ruby strings and dispatch to
+    // RGSS::Runtime.run_script. We can't use rb_eval_string_protect on the
+    // raw C buffer because MRI tags the resulting source — and any String
+    // literals defined in it — as ASCII-8BIT, which makes PE's letter-by-
+    // letter renderer byte-iterate multibyte glyphs (Pokémon → PokÃ©mon).
     let mut state: c_int = 0;
     unsafe {
-        rb_eval_string_protect(script.as_ptr(), &mut state);
+        let src_val = rb_utf8_str_new(
+            section.source.as_ptr() as *const c_char,
+            section.source.len() as i64,
+        );
+        rb_gv_set(b"$__rgss_section_src__\0".as_ptr() as *const c_char, src_val);
+        let lbl_val = rb_utf8_str_new(
+            label.as_ptr() as *const c_char,
+            label.len() as i64,
+        );
+        rb_gv_set(b"$__rgss_section_lbl__\0".as_ptr() as *const c_char, lbl_val);
+        let bootstrap: &[u8] =
+            b"RGSS::Runtime.run_script($__rgss_section_src__, $__rgss_section_lbl__); $__rgss_section_src__ = $__rgss_section_lbl__ = nil\0";
+        rb_eval_string_protect(bootstrap.as_ptr() as *const c_char, &mut state);
         if state != 0 {
             let message = current_exception_message();
             if let Some(full) = current_exception_full_message() {
