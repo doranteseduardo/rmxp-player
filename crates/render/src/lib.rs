@@ -391,8 +391,11 @@ impl<'a> Renderer<'a> {
         if let Some(data) = frame_data {
             sprite_count = data.sprites.len();
             window_count = data.windows.len();
-            let t1 = Instant::now();
             if data.tilemaps.is_empty() {
+                // Overworld / non-RGSS-tilemap path: draw the tile-scene base,
+                // then the fixed plane -> sprite -> window order it has always
+                // used (this path works; leave it untouched).
+                let t1 = Instant::now();
                 if let Some(fallback) = data.fallback {
                     draw_tile_scene(
                         fallback.scene,
@@ -404,26 +407,32 @@ impl<'a> Renderer<'a> {
                     );
                     draw_sprites(self.logical_size, frame, fallback.sprites);
                 }
+                t_tile = t1.elapsed();
+                let t2 = Instant::now();
+                draw_planes(self.logical_size, frame, data.planes);
+                t_planes = t2.elapsed();
+                let ts = Instant::now();
+                for sprite in data.sprites {
+                    draw_sprite(self.logical_size, frame, sprite);
+                }
+                t_sprites = ts.elapsed();
+                let tw = Instant::now();
+                for window in data.windows {
+                    draw_window(self.logical_size, frame, window);
+                }
+                t_windows = tw.elapsed();
             } else {
-                draw_tilemaps(self.logical_size, frame, data.tilemaps, frame_index);
+                // RGSS scene (battle, bag, menus, ...): composite ALL drawables
+                // in one z-order, as RMXP does. Each instance's `z` is
+                // combined_z(viewport.z, element.z), so a single stable sort
+                // reproduces viewport layering; ties draw back->front
+                // (tilemap, plane, sprite, window). The old code drew every
+                // window over every sprite regardless of z, so battle
+                // databoxes/panels layered wrong ("incomplete" scenes).
+                let ts = Instant::now();
+                draw_composited(self.logical_size, frame, &data, frame_index);
+                t_sprites = ts.elapsed();
             }
-            t_tile = t1.elapsed();
-            let t2 = Instant::now();
-            draw_planes(self.logical_size, frame, data.planes);
-            t_planes = t2.elapsed();
-            // Original ordering: sprites first, windows always on top.
-            // Z-merging sprites and windows hid PE's panels behind high-z
-            // sprites; revert until we have a more nuanced model.
-            let ts = Instant::now();
-            for sprite in data.sprites {
-                draw_sprite(self.logical_size, frame, sprite);
-            }
-            t_sprites = ts.elapsed();
-            let tw = Instant::now();
-            for window in data.windows {
-                draw_window(self.logical_size, frame, window);
-            }
-            t_windows = tw.elapsed();
         }
         let t4 = Instant::now();
         let effects = screen_effects();
@@ -815,6 +824,47 @@ fn draw_sprites(size: (u32, u32), frame: &mut [u8], sprites: &[SpriteInstance]) 
     }
     for sprite in sprites {
         draw_sprite(size, frame, sprite);
+    }
+}
+
+/// Composite tilemaps, planes, sprites and windows in a single z-order, the way
+/// RMXP draws a scene. Each instance's `z` is the engine's combined_z key
+/// (viewport.z * 1e6 + element.z), so one stable sort reproduces viewport
+/// layering. For equal z, draw back -> front: tilemap, plane, sprite, window.
+/// Each input slice is already z-sorted, so the stable sort preserves per-type
+/// ordering (e.g. sprite creation order) within a z bucket.
+fn draw_composited(size: (u32, u32), frame: &mut [u8], data: &RenderFrame<'_>, frame_index: u64) {
+    enum Item {
+        Tilemap(usize),
+        Plane(usize),
+        Sprite(usize),
+        Window(usize),
+    }
+    let mut order: Vec<(i64, u8, Item)> = Vec::with_capacity(
+        data.tilemaps.len() + data.planes.len() + data.sprites.len() + data.windows.len(),
+    );
+    for (i, t) in data.tilemaps.iter().enumerate() {
+        order.push((t.z, 0, Item::Tilemap(i)));
+    }
+    for (i, p) in data.planes.iter().enumerate() {
+        order.push((p.z, 1, Item::Plane(i)));
+    }
+    for (i, s) in data.sprites.iter().enumerate() {
+        order.push((s.z, 2, Item::Sprite(i)));
+    }
+    for (i, w) in data.windows.iter().enumerate() {
+        order.push((w.z, 3, Item::Window(i)));
+    }
+    order.sort_by_key(|(z, rank, _)| (*z, *rank));
+    for (_, _, item) in &order {
+        match *item {
+            Item::Tilemap(i) => {
+                draw_tilemaps(size, frame, std::slice::from_ref(&data.tilemaps[i]), frame_index)
+            }
+            Item::Plane(i) => draw_planes(size, frame, std::slice::from_ref(&data.planes[i])),
+            Item::Sprite(i) => draw_sprite(size, frame, &data.sprites[i]),
+            Item::Window(i) => draw_window(size, frame, &data.windows[i]),
+        }
     }
 }
 
