@@ -294,17 +294,21 @@ pub fn get_pixel(id: u32, x: i32, y: i32) -> Option<ColorData> {
 }
 
 pub fn copy_bitmap(src_id: u32) -> Option<u32> {
-    BITMAPS
+    // Clone the source texture (cheap Arc bump) UNDER the lock, then release it
+    // before inserting the copy. store_bitmap_data() locks BITMAPS again, and the
+    // store's Mutex is non-reentrant — inserting inside `with` (which still holds
+    // the lock) would deadlock the calling thread (e.g. Bitmap#dup/#clone, which
+    // PE's name-entry screen uses, froze here).
+    let texture = BITMAPS
         .with(src_id, |entry| {
             if entry.disposed {
                 None
             } else {
-                Some(store_bitmap_data(BitmapData::with_texture(
-                    entry.texture.clone(),
-                )))
+                Some(entry.texture.clone())
             }
         })
-        .flatten()
+        .flatten()?;
+    Some(store_bitmap_data(BitmapData::with_texture(texture)))
 }
 
 fn bitmap_texture(id: u32) -> Option<Arc<RgbaImage>> {
