@@ -128,6 +128,14 @@ class << Object
   alias_method :_rgss_orig_method_added, :method_added rescue nil
   def method_added(name)
     super if defined?(super)
+    # Only wrap GENUINE top-level helpers (private instance methods of Object).
+    # This hook lives on Object's singleton class, and every class's singleton
+    # class inherits from Object's — so without this guard method_added also
+    # fires for subclasses, and `private name` below would privatise their
+    # public methods. e.g. Battle::Scene#pbDisplayMessage (a public method) got
+    # privatised, breaking `@scene.pbDisplayMessage(...)` with "private method
+    # called for #<Battle::Scene>".
+    return unless equal?(Object)
     return unless RGSSTextEncodingShim::TARGETS.include?(name)
     return if name.to_s.start_with?('_rgss_orig_')
     return if private_method_defined?(:"_rgss_orig_#{name}") ||
