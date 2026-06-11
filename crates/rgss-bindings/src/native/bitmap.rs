@@ -225,22 +225,6 @@ pub fn stretch_blt(
     }
 }
 
-/// Read a Ruby C-string. RPG Maker XP rxdata frequently produces strings in
-/// Windows-1252 (Latin-1 superset), so when the bytes aren't valid UTF-8 we
-/// decode each byte as a Unicode codepoint (Latin-1 == U+0000..U+00FF) — that
-/// way "Pokémon" with the legacy 0xE9 byte ends up as a real é instead of
-/// `\u{FFFD}`.
-fn read_ruby_text(ptr: *const c_char) -> String {
-    if ptr.is_null() {
-        return String::new();
-    }
-    let bytes = unsafe { CStr::from_ptr(ptr) }.to_bytes();
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_string(),
-        Err(_) => bytes.iter().map(|&b| b as char).collect(),
-    }
-}
-
 pub fn draw_text(id: u32, rect: RectData, text: &str, align: i32, spec: &FontSpec) {
     let _ = with_bitmap_mut(id, |image| {
         font::draw_text(
@@ -786,12 +770,10 @@ unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, _self: VA
     let y = rb_num2int(args[2]) as i32;
     let width = rb_num2int(args[3]).max(0) as i32;
     let height = rb_num2int(args[4]).max(0) as i32;
-    let mut text_value = args[5];
-    let text_ptr = unsafe { rb_string_value_cstr(&mut text_value) };
-    if text_ptr.is_null() {
-        return rb_sys::Qnil as VALUE;
-    }
-    let text = read_ruby_text(text_ptr);
+    let text = match crate::native::util::value_to_string(args[5]) {
+        Some(t) => t,
+        None => return rb_sys::Qnil as VALUE,
+    };
     let align = rb_num2int(args[6]) as i32;
     let font_size = rb_num2int(args[7]) as i32;
     let font_size = font_size.max(6);
@@ -821,12 +803,10 @@ unsafe extern "C" fn bitmap_text_size(argc: c_int, argv: *const VALUE, _self: VA
     }
     let font_size = rb_num2int(*argv) as i32;
     let font_size = font_size.max(6);
-    let mut text_value = *argv.add(1);
-    let text_ptr = rb_string_value_cstr(&mut text_value);
-    if text_ptr.is_null() {
-        return rb_sys::Qnil as VALUE;
-    }
-    let text = read_ruby_text(text_ptr);
+    let text = match crate::native::util::value_to_string(*argv.add(1)) {
+        Some(t) => t,
+        None => return rb_sys::Qnil as VALUE,
+    };
     let spec = FontSpec {
         names: Vec::new(),
         size: font_size,
