@@ -117,9 +117,13 @@ pub fn create(viewport: Option<u32>) -> u32 {
 }
 
 pub fn dispose(id: u32) {
-    SPRITES.with_mut(id, |sprite| {
-        sprite.disposed = true;
-    });
+    // Remove the entry so the SpriteData (and its retained handles) is freed
+    // rather than kept for the process lifetime. Sprites are the highest-churn
+    // object (animations, messages, spritesets), so retaining every disposed one
+    // accumulates. The renderer filters disposed/absent sprites identically, the
+    // Ruby-side dispose() also clears the sync registry, and setters no-op on an
+    // absent handle — so behavior is unchanged while memory is reclaimed.
+    SPRITES.remove(id);
 }
 
 pub fn set_viewport(id: u32, viewport: Option<u32>) {

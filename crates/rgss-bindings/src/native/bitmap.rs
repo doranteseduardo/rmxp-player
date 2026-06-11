@@ -1,15 +1,15 @@
 use super::{
     font::{self, FontSpec},
-    module, native_module, value_to_bool, ColorData, HandleStore, RectData,
+    module, native_module, value_to_bool, value_to_i32, value_to_string, value_to_u32, ColorData,
+    HandleStore, RectData,
 };
 use crate::fs;
 use anyhow::{Context, Result};
 use font8x8::legacy::BASIC_LEGACY;
 use image::{imageops::FilterType, ImageReader, Rgba, RgbaImage};
 use once_cell::sync::Lazy;
-use rb_sys::{rb_ll2inum, rb_num2int, rb_num2uint, rb_uint2inum, VALUE};
+use rb_sys::{rb_ll2inum, rb_uint2inum, VALUE};
 use std::{
-    ffi::CStr,
     os::raw::{c_char, c_int},
     path::{Path, PathBuf},
     sync::Arc,
@@ -79,7 +79,6 @@ extern "C" {
         func: Option<unsafe extern "C" fn(c_int, *const VALUE, VALUE) -> VALUE>,
         argc: c_int,
     );
-    fn rb_string_value_cstr(ptr: *mut VALUE) -> *const c_char;
 }
 
 pub fn init() -> Result<()> {
@@ -423,9 +422,9 @@ unsafe extern "C" fn bitmap_create(argc: c_int, argv: *const VALUE, _self: VALUE
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let width = clamp_dimension(rb_num2int(args[0]) as i32);
+    let width = clamp_dimension(value_to_i32(args[0]));
     let height = if args.len() >= 2 {
-        clamp_dimension(rb_num2int(args[1]) as i32)
+        clamp_dimension(value_to_i32(args[1]))
     } else {
         width
     };
@@ -437,12 +436,10 @@ unsafe extern "C" fn bitmap_load(argc: c_int, argv: *const VALUE, _self: VALUE) 
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let mut arg = *argv;
-    let path_ptr = rb_string_value_cstr(&mut arg);
-    if path_ptr.is_null() {
-        return rb_sys::Qnil as VALUE;
-    }
-    let path = CStr::from_ptr(path_ptr).to_string_lossy().to_string();
+    let path = match value_to_string(*argv) {
+        Some(t) => t,
+        None => return rb_sys::Qnil as VALUE,
+    };
     match load_relative(&path) {
         Ok(id) => rb_uint2inum(id as usize),
         Err(err) => {
@@ -456,7 +453,7 @@ unsafe extern "C" fn bitmap_dispose(argc: c_int, argv: *const VALUE, _self: VALU
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let id = rb_num2uint(*argv) as u32;
+    let id = value_to_u32(*argv);
     dispose(id);
     rb_sys::Qnil as VALUE
 }
@@ -465,7 +462,7 @@ unsafe extern "C" fn bitmap_width(argc: c_int, argv: *const VALUE, _self: VALUE)
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let id = rb_num2uint(*argv) as u32;
+    let id = value_to_u32(*argv);
     let width = dimensions(id).map(|(w, _)| w).unwrap_or(0);
     int_to_value(width as i64)
 }
@@ -474,7 +471,7 @@ unsafe extern "C" fn bitmap_height(argc: c_int, argv: *const VALUE, _self: VALUE
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let id = rb_num2uint(*argv) as u32;
+    let id = value_to_u32(*argv);
     let height = dimensions(id).map(|(_, h)| h).unwrap_or(0);
     int_to_value(height as i64)
 }
@@ -483,7 +480,7 @@ unsafe extern "C" fn bitmap_disposed_q(argc: c_int, argv: *const VALUE, _self: V
     if argc != 1 || argv.is_null() {
         return rb_sys::Qfalse as VALUE;
     }
-    let id = rb_num2uint(*argv) as u32;
+    let id = value_to_u32(*argv);
     let disposed = is_disposed(id);
     if disposed {
         rb_sys::Qtrue as VALUE
@@ -586,14 +583,14 @@ unsafe extern "C" fn bitmap_fill_rect(argc: c_int, argv: *const VALUE, _self: VA
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let id = rb_num2uint(args[0]) as u32;
+    let id = value_to_u32(args[0]);
     let rect = RectData::new(
-        rb_num2int(args[1]) as i32,
-        rb_num2int(args[2]) as i32,
-        rb_num2int(args[3]).max(0) as i32,
-        rb_num2int(args[4]).max(0) as i32,
+        value_to_i32(args[1]),
+        value_to_i32(args[2]),
+        value_to_i32(args[3]).max(0),
+        value_to_i32(args[4]).max(0),
     );
-    let packed = rb_num2uint(args[5]) as u32;
+    let packed = value_to_u32(args[5]);
     let color = unpack_color(packed);
     fill_rect(
         id,
@@ -617,15 +614,15 @@ unsafe extern "C" fn bitmap_gradient_fill_rect(
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let id = rb_num2uint(args[0]) as u32;
+    let id = value_to_u32(args[0]);
     let rect = RectData::new(
-        rb_num2int(args[1]) as i32,
-        rb_num2int(args[2]) as i32,
-        rb_num2int(args[3]).max(0) as i32,
-        rb_num2int(args[4]).max(0) as i32,
+        value_to_i32(args[1]),
+        value_to_i32(args[2]),
+        value_to_i32(args[3]).max(0),
+        value_to_i32(args[4]).max(0),
     );
-    let color1 = unpack_color(rb_num2uint(args[5]) as u32);
-    let color2 = unpack_color(rb_num2uint(args[6]) as u32);
+    let color1 = unpack_color(value_to_u32(args[5]));
+    let color2 = unpack_color(value_to_u32(args[6]));
     let vertical = value_to_bool(args[7]);
     gradient_fill_rect(
         id,
@@ -651,7 +648,7 @@ unsafe extern "C" fn bitmap_clear(argc: c_int, argv: *const VALUE, _self: VALUE)
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let id = rb_num2uint(*argv) as u32;
+    let id = value_to_u32(*argv);
     clear(id);
     rb_sys::Qnil as VALUE
 }
@@ -661,9 +658,9 @@ unsafe extern "C" fn bitmap_get_pixel(argc: c_int, argv: *const VALUE, _self: VA
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, 3);
-    let id = rb_num2uint(args[0]) as u32;
-    let x = rb_num2int(args[1]) as i32;
-    let y = rb_num2int(args[2]) as i32;
+    let id = value_to_u32(args[0]);
+    let x = value_to_i32(args[1]);
+    let y = value_to_i32(args[2]);
     if let Some(color) = get_pixel(id, x, y) {
         let packed = pack_color([
             color.red as u8,
@@ -682,14 +679,14 @@ unsafe extern "C" fn bitmap_set_pixel(argc: c_int, argv: *const VALUE, _self: VA
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let id = rb_num2uint(args[0]) as u32;
-    let x = rb_num2int(args[1]) as i32;
-    let y = rb_num2int(args[2]) as i32;
-    let r = rb_num2int(args[3]) as i32;
-    let g = rb_num2int(args[4]) as i32;
-    let b = rb_num2int(args[5]) as i32;
+    let id = value_to_u32(args[0]);
+    let x = value_to_i32(args[1]);
+    let y = value_to_i32(args[2]);
+    let r = value_to_i32(args[3]);
+    let g = value_to_i32(args[4]);
+    let b = value_to_i32(args[5]);
     let a = if args.len() >= 7 {
-        rb_num2int(args[6]) as i32
+        value_to_i32(args[6])
     } else {
         255
     };
@@ -712,16 +709,16 @@ unsafe extern "C" fn bitmap_blt(argc: c_int, argv: *const VALUE, _self: VALUE) -
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let dest_id = rb_num2uint(args[0]) as u32;
-    let dx = rb_num2int(args[1]) as i32;
-    let dy = rb_num2int(args[2]) as i32;
-    let src_id = rb_num2uint(args[3]) as u32;
-    let sx = rb_num2int(args[4]) as i32;
-    let sy = rb_num2int(args[5]) as i32;
-    let sw = rb_num2int(args[6]).max(0) as i32;
-    let sh = rb_num2int(args[7]).max(0) as i32;
+    let dest_id = value_to_u32(args[0]);
+    let dx = value_to_i32(args[1]);
+    let dy = value_to_i32(args[2]);
+    let src_id = value_to_u32(args[3]);
+    let sx = value_to_i32(args[4]);
+    let sy = value_to_i32(args[5]);
+    let sw = value_to_i32(args[6]).max(0);
+    let sh = value_to_i32(args[7]).max(0);
     let opacity = if argc >= 9 {
-        rb_num2int(args[8]).clamp(0, 255) as u8
+        value_to_i32(args[8]).clamp(0, 255) as u8
     } else {
         255
     };
@@ -736,18 +733,18 @@ unsafe extern "C" fn bitmap_stretch_blt(argc: c_int, argv: *const VALUE, _self: 
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let dest_id = rb_num2uint(args[0]) as u32;
-    let dx = rb_num2int(args[1]) as i32;
-    let dy = rb_num2int(args[2]) as i32;
-    let dw = rb_num2int(args[3]).max(0) as i32;
-    let dh = rb_num2int(args[4]).max(0) as i32;
-    let src_id = rb_num2uint(args[5]) as u32;
-    let sx = rb_num2int(args[6]) as i32;
-    let sy = rb_num2int(args[7]) as i32;
-    let sw = rb_num2int(args[8]).max(0) as i32;
-    let sh = rb_num2int(args[9]).max(0) as i32;
+    let dest_id = value_to_u32(args[0]);
+    let dx = value_to_i32(args[1]);
+    let dy = value_to_i32(args[2]);
+    let dw = value_to_i32(args[3]).max(0);
+    let dh = value_to_i32(args[4]).max(0);
+    let src_id = value_to_u32(args[5]);
+    let sx = value_to_i32(args[6]);
+    let sy = value_to_i32(args[7]);
+    let sw = value_to_i32(args[8]).max(0);
+    let sh = value_to_i32(args[9]).max(0);
     let opacity = if argc >= 11 {
-        rb_num2int(args[10]).clamp(0, 255) as u8
+        value_to_i32(args[10]).clamp(0, 255) as u8
     } else {
         255
     };
@@ -765,19 +762,19 @@ unsafe extern "C" fn bitmap_draw_text(argc: c_int, argv: *const VALUE, _self: VA
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
-    let id = rb_num2uint(args[0]) as u32;
-    let x = rb_num2int(args[1]) as i32;
-    let y = rb_num2int(args[2]) as i32;
-    let width = rb_num2int(args[3]).max(0) as i32;
-    let height = rb_num2int(args[4]).max(0) as i32;
+    let id = value_to_u32(args[0]);
+    let x = value_to_i32(args[1]);
+    let y = value_to_i32(args[2]);
+    let width = value_to_i32(args[3]).max(0);
+    let height = value_to_i32(args[4]).max(0);
     let text = match crate::native::util::value_to_string(args[5]) {
         Some(t) => t,
         None => return rb_sys::Qnil as VALUE,
     };
-    let align = rb_num2int(args[6]) as i32;
-    let font_size = rb_num2int(args[7]) as i32;
+    let align = value_to_i32(args[6]);
+    let font_size = value_to_i32(args[7]);
     let font_size = font_size.max(6);
-    let color = unpack_color(rb_num2uint(args[8]) as u32);
+    let color = unpack_color(value_to_u32(args[8]));
     let color = ColorData::new(
         color.0[0] as f32,
         color.0[1] as f32,
@@ -801,7 +798,7 @@ unsafe extern "C" fn bitmap_text_size(argc: c_int, argv: *const VALUE, _self: VA
     if argc != 2 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let font_size = rb_num2int(*argv) as i32;
+    let font_size = value_to_i32(*argv);
     let font_size = font_size.max(6);
     let text = match crate::native::util::value_to_string(*argv.add(1)) {
         Some(t) => t,
@@ -1158,8 +1155,8 @@ unsafe extern "C" fn bitmap_hue_change(argc: c_int, argv: *const VALUE, _self: V
         return rb_sys::Qnil as VALUE;
     }
     let args = std::slice::from_raw_parts(argv, 2);
-    let id = rb_num2uint(args[0]) as u32;
-    let hue = rb_num2int(args[1]) as i32;
+    let id = value_to_u32(args[0]);
+    let hue = value_to_i32(args[1]);
     hue_change(id, hue);
     rb_sys::Qnil as VALUE
 }

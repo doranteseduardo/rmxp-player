@@ -1,13 +1,14 @@
-use crate::{native, runtime, system};
+use crate::native::{self, value_to_f64, value_to_i64, value_to_string};
+use crate::{runtime, system};
 use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use once_cell::sync::{Lazy, OnceCell};
 use rb_sys::{
     rb_ary_new, rb_ary_push, rb_cObject, rb_const_get, rb_define_module, rb_eRuntimeError,
-    rb_float_new, rb_intern, rb_ll2inum, rb_num2dbl, rb_num2long, rb_raise, VALUE,
+    rb_float_new, rb_intern, rb_ll2inum, rb_raise, VALUE,
 };
 use std::{
-    ffi::{CStr, CString},
+    ffi::CString,
     os::raw::{c_char, c_int},
     path::Path,
     sync::{
@@ -146,7 +147,6 @@ extern "C" {
         func: Option<RubyFn>,
         argc: c_int,
     );
-    fn rb_string_value_cstr(value: *mut VALUE) -> *const c_char;
 }
 
 pub fn init() -> Result<()> {
@@ -444,8 +444,8 @@ unsafe extern "C" fn graphics_set_frame_count(
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let value = rb_num2long(*argv);
-    FRAME_COUNT.store(value as i64, Ordering::Relaxed);
+    let value = value_to_i64(*argv);
+    FRAME_COUNT.store(value, Ordering::Relaxed);
     rb_sys::Qnil as VALUE
 }
 
@@ -465,7 +465,7 @@ unsafe extern "C" fn graphics_set_frame_rate(
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let value = rb_num2long(*argv);
+    let value = value_to_i64(*argv);
     if value > 0 {
         FRAME_RATE.store(value as u32, Ordering::Relaxed);
     }
@@ -483,7 +483,7 @@ unsafe extern "C" fn graphics_freeze(_argc: c_int, _argv: *const VALUE, _self: V
 unsafe extern "C" fn graphics_transition(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     // Parameters: duration, filename, vague. We currently treat as no-op.
     if argc > 0 && !argv.is_null() {
-        let duration = rb_num2long(*argv).max(0) as i64;
+        let duration = value_to_i64(*argv).max(0);
         advance_time(duration);
     }
     SCREEN_FROZEN.store(false, Ordering::Relaxed);
@@ -502,21 +502,21 @@ unsafe extern "C" fn graphics_frame_reset(
 
 unsafe extern "C" fn graphics_wait(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     let frames = if argc >= 1 && !argv.is_null() {
-        let value = rb_num2long(*argv);
+        let value = value_to_i64(*argv);
         value.max(0)
     } else {
         1
     };
-    advance_time(frames as i64);
+    advance_time(frames);
     rb_sys::Qnil as VALUE
 }
 
 unsafe extern "C" fn graphics_fadeout(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     let frames = if argc >= 1 && !argv.is_null() {
-        rb_num2long(*argv).max(0)
+        value_to_i64(*argv).max(0)
     } else {
         30
-    } as i64;
+    };
     start_fade(frames, 0);
     advance_time(frames);
     rb_sys::Qnil as VALUE
@@ -524,10 +524,10 @@ unsafe extern "C" fn graphics_fadeout(argc: c_int, argv: *const VALUE, _self: VA
 
 unsafe extern "C" fn graphics_fadein(argc: c_int, argv: *const VALUE, _self: VALUE) -> VALUE {
     let frames = if argc >= 1 && !argv.is_null() {
-        rb_num2long(*argv).max(0)
+        value_to_i64(*argv).max(0)
     } else {
         30
-    } as i64;
+    };
     start_fade(frames, 255);
     advance_time(frames);
     rb_sys::Qnil as VALUE
@@ -549,8 +549,8 @@ unsafe extern "C" fn graphics_resize_screen(
     if argc < 2 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let width = rb_num2long(*argv) as i64;
-    let height = rb_num2long(*argv.add(1)) as i64;
+    let width = value_to_i64(*argv);
+    let height = value_to_i64(*argv.add(1));
     if width > 0 && height > 0 {
         SCREEN_WIDTH.store(width as u32, Ordering::Relaxed);
         SCREEN_HEIGHT.store(height as u32, Ordering::Relaxed);
@@ -739,12 +739,10 @@ unsafe extern "C" fn graphics_screenshot(argc: c_int, argv: *const VALUE, _self:
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let mut arg = *argv;
-    let ptr = rb_string_value_cstr(&mut arg);
-    if ptr.is_null() {
-        return rb_sys::Qnil as VALUE;
-    }
-    let path = CStr::from_ptr(ptr).to_string_lossy().to_string();
+    let path = match value_to_string(*argv) {
+        Some(t) => t,
+        None => return rb_sys::Qnil as VALUE,
+    };
     match clone_last_frame() {
         Some(texture) => {
             let destination = Path::new(path.as_str());
@@ -781,7 +779,7 @@ unsafe extern "C" fn graphics_set_brightness(
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let value = rb_num2long(*argv).clamp(0, 255) as i32;
+    let value = value_to_i64(*argv).clamp(0, 255) as i32;
     BRIGHTNESS.store(value, Ordering::Relaxed);
     rb_sys::Qnil as VALUE
 }
@@ -806,10 +804,10 @@ unsafe extern "C" fn graphics_set_tone(argc: c_int, argv: *const VALUE, _self: V
     }
     let args = std::slice::from_raw_parts(argv, 4);
     let mut tone = ToneState::default();
-    tone.red = clamp_tone_channel(rb_num2long(args[0]) as f32);
-    tone.green = clamp_tone_channel(rb_num2long(args[1]) as f32);
-    tone.blue = clamp_tone_channel(rb_num2long(args[2]) as f32);
-    tone.gray = clamp_gray_channel(rb_num2long(args[3]) as f32);
+    tone.red = clamp_tone_channel(value_to_i64(args[0]) as f32);
+    tone.green = clamp_tone_channel(value_to_i64(args[1]) as f32);
+    tone.blue = clamp_tone_channel(value_to_i64(args[2]) as f32);
+    tone.gray = clamp_gray_channel(value_to_i64(args[3]) as f32);
     if let Ok(mut slot) = SCREEN_TONE.write() {
         *slot = tone;
     }
@@ -822,12 +820,12 @@ unsafe extern "C" fn graphics_flash(argc: c_int, argv: *const VALUE, _self: VALU
     }
     let args = std::slice::from_raw_parts(argv, argc as usize);
     let color = [
-        rb_num2long(args[0]).clamp(0, 255) as f32,
-        rb_num2long(args[1]).clamp(0, 255) as f32,
-        rb_num2long(args[2]).clamp(0, 255) as f32,
-        rb_num2long(args[3]).clamp(0, 255) as f32,
+        value_to_i64(args[0]).clamp(0, 255) as f32,
+        value_to_i64(args[1]).clamp(0, 255) as f32,
+        value_to_i64(args[2]).clamp(0, 255) as f32,
+        value_to_i64(args[3]).clamp(0, 255) as f32,
     ];
-    let duration = rb_num2long(args[4]).max(0) as i64;
+    let duration = value_to_i64(args[4]).max(0);
     if let Ok(mut slot) = FLASH_STATE.write() {
         if duration == 0 {
             *slot = None;
@@ -935,7 +933,7 @@ unsafe extern "C" fn graphics_set_scale(argc: c_int, argv: *const VALUE, _self: 
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let value = rb_num2dbl(*argv) as f32;
+    let value = value_to_f64(*argv) as f32;
     let clamped = if value <= 0.0 { 1.0 } else { value };
     SCALE_FACTOR.store(clamped.to_bits(), Ordering::Relaxed);
     let base_w = SCREEN_WIDTH.load(Ordering::Relaxed);
@@ -1002,7 +1000,7 @@ unsafe extern "C" fn graphics_set_smooth_scaling(
     if argc != 1 || argv.is_null() {
         return rb_sys::Qnil as VALUE;
     }
-    let value = rb_num2long(*argv) as i32;
+    let value = value_to_i64(*argv) as i32;
     SMOOTH_SCALING.store(value, Ordering::Relaxed);
     rb_sys::Qnil as VALUE
 }

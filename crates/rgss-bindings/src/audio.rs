@@ -1,9 +1,9 @@
 use crate::fs;
+use crate::native::{value_to_i64, value_to_string};
 use anyhow::{anyhow, Result};
 use once_cell::sync::Lazy;
-use rb_sys::{rb_define_module, rb_num2long, rb_string_value_cstr, VALUE};
+use rb_sys::{rb_define_module, VALUE};
 use std::{
-    ffi::CStr,
     os::raw::{c_char, c_int},
     path::{Path, PathBuf},
     sync::RwLock,
@@ -335,16 +335,14 @@ unsafe fn parse_se_command(argc: c_int, argv: *const VALUE) -> Option<SeCommand>
 
 unsafe fn parse_duration(argc: c_int, argv: *const VALUE) -> Option<u32> {
     let args = slice_args(argc, argv);
-    args.get(0).map(|value| rb_num2long(*value).max(0) as u32)
+    args.get(0).map(|value| value_to_i64(*value).max(0) as u32)
 }
 
 unsafe fn parse_audio_path(value: &VALUE) -> Option<PathBuf> {
-    let mut arg = *value;
-    let ptr = rb_string_value_cstr(&mut arg);
-    if ptr.is_null() {
-        return None;
-    }
-    let raw = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+    let raw = match value_to_string(*value) {
+        Some(t) => t,
+        None => return None,
+    };
     Some(resolve_audio_path(&raw))
 }
 
@@ -360,21 +358,21 @@ fn resolve_audio_path(input: &str) -> PathBuf {
 
 fn parse_volume(value: Option<&VALUE>) -> i32 {
     value
-        .map(|val| unsafe { rb_num2long(*val) as i32 })
+        .map(|val| value_to_i64(*val) as i32)
         .unwrap_or(100)
         .clamp(0, 100)
 }
 
 fn parse_pitch(value: Option<&VALUE>) -> i32 {
     value
-        .map(|val| unsafe { rb_num2long(*val) as i32 })
+        .map(|val| value_to_i64(*val) as i32)
         .unwrap_or(100)
         .clamp(50, 150)
 }
 
 fn parse_position(value: Option<&VALUE>) -> u32 {
     value
-        .map(|val| unsafe { rb_num2long(*val).max(0) as u32 })
+        .map(|val| value_to_i64(*val).max(0) as u32)
         .unwrap_or(0)
 }
 

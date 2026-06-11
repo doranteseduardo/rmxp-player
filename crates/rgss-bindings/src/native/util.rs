@@ -36,30 +36,49 @@ pub fn value_to_string(value: VALUE) -> Option<String> {
     }
 }
 
-/// Convert a Ruby VALUE to i32 WITHOUT risking a Ruby exception (`longjmp`).
-///
-/// `rb_num2int` raises (TypeError on non-numeric, RangeError on overflow), and a
-/// `longjmp` across these `extern "C"` frames — which hold `Drop` Rust state — is
-/// undefined behavior. So we only convert values that cannot raise:
-///   * Fixnum -> `rb_num2long` (a Fixnum always fits a C long, never raises),
-///              truncated to i32 (matches RGSS coordinate/size semantics).
-///   * Float  -> `rb_num2dbl` (never raises on a Float), truncated to i32.
-/// Anything else (nil, String, Array, Bignum, custom objects) degrades to 0
-/// instead of crashing.
-pub fn value_to_i32(value: VALUE) -> i32 {
+// ── Numeric coercion ────────────────────────────────────────────────────────
+//
+// `rb_num2int`/`rb_num2uint`/`rb_num2long`/`rb_num2dbl` RAISE a Ruby exception
+// (TypeError on a non-numeric value, RangeError on overflow). Letting that
+// `longjmp` unwind an `extern "C"` frame that holds `Drop` Rust state is
+// undefined behavior. These helpers type-check first and only call a conversion
+// that cannot raise for the confirmed type:
+//   * Fixnum -> `rb_num2long` (a Fixnum always fits a C long; never raises)
+//   * Float  -> `rb_num2dbl` (never raises on a Float)
+// Anything else (nil, String, Array, Bignum, custom objects) degrades to 0
+// instead of crashing. Bignum is treated as out-of-range -> 0; no RGSS value
+// legitimately exceeds i64.
+
+/// Convert a Ruby VALUE to i64 without risking a Ruby exception.
+pub fn value_to_i64(value: VALUE) -> i64 {
     match rb_value_type(value) {
-        ruby_value_type::RUBY_T_FIXNUM => unsafe { rb_num2long(value) as i32 },
-        ruby_value_type::RUBY_T_FLOAT => unsafe { rb_num2dbl(value) as i32 },
+        ruby_value_type::RUBY_T_FIXNUM => unsafe { rb_num2long(value) },
+        ruby_value_type::RUBY_T_FLOAT => unsafe { rb_num2dbl(value) as i64 },
         _ => 0,
     }
 }
 
-/// Convert a Ruby VALUE to f32 WITHOUT risking a Ruby exception (`longjmp`).
-/// Only Fixnum/Float are converted; anything else degrades to 0.0.
-pub fn value_to_f32(value: VALUE) -> f32 {
+/// Convert a Ruby VALUE to f64 without risking a Ruby exception.
+pub fn value_to_f64(value: VALUE) -> f64 {
     match rb_value_type(value) {
-        ruby_value_type::RUBY_T_FIXNUM => unsafe { rb_num2long(value) as f32 },
-        ruby_value_type::RUBY_T_FLOAT => unsafe { rb_num2dbl(value) as f32 },
+        ruby_value_type::RUBY_T_FIXNUM => unsafe { rb_num2long(value) as f64 },
+        ruby_value_type::RUBY_T_FLOAT => unsafe { rb_num2dbl(value) },
         _ => 0.0,
     }
+}
+
+/// Convert a Ruby VALUE to i32 without risking a Ruby exception (truncating).
+pub fn value_to_i32(value: VALUE) -> i32 {
+    value_to_i64(value) as i32
+}
+
+/// Convert a Ruby VALUE to u32 without risking a Ruby exception (low 32 bits).
+/// Used for native handles and packed RGBA values, which are non-negative.
+pub fn value_to_u32(value: VALUE) -> u32 {
+    value_to_i64(value) as u32
+}
+
+/// Convert a Ruby VALUE to f32 without risking a Ruby exception (truncating).
+pub fn value_to_f32(value: VALUE) -> f32 {
+    value_to_f64(value) as f32
 }
