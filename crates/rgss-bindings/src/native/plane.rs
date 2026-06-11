@@ -84,9 +84,10 @@ pub fn create(viewport: Option<u32>) -> u32 {
 }
 
 pub fn dispose(id: u32) {
-    PLANES.with_mut(id, |plane| {
-        plane.disposed = true;
-    });
+    // Remove the entry so disposed planes don't accumulate in the per-frame
+    // snapshot. Renderer filters disposed/absent identically; nothing references
+    // a plane by handle, so this is behavior-preserving.
+    PLANES.remove(id);
 }
 
 pub fn set_viewport(id: u32, viewport: Option<u32>) {
@@ -182,9 +183,7 @@ unsafe extern "C" fn plane_dispose(argc: c_int, argv: *const VALUE, _self: VALUE
         return rb_sys::Qnil as VALUE;
     }
     let id = value_to_i32(*argv) as u32;
-    PLANES.with_mut(id, |plane| {
-        plane.disposed = true;
-    });
+    dispose(id);
     rb_sys::Qnil as VALUE
 }
 

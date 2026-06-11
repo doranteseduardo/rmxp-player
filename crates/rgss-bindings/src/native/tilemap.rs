@@ -110,7 +110,10 @@ pub fn create(viewport: Option<u32>) -> u32 {
 }
 
 pub fn dispose(id: u32) {
-    TILEMAPS.with_mut(id, |tilemap| tilemap.disposed = true);
+    // Remove the entry so disposed tilemaps (which hold map-data tables) don't
+    // linger in the per-frame snapshot. Renderer filters disposed/absent
+    // identically; nothing references a tilemap by handle.
+    TILEMAPS.remove(id);
 }
 
 pub fn set_viewport(id: u32, viewport: Option<u32>) {

@@ -107,7 +107,11 @@ pub fn create() -> u32 {
 }
 
 pub fn dispose(id: u32) {
-    WINDOWS.with_mut(id, |window| window.disposed = true);
+    // Remove the entry so disposed windows don't accumulate in the store and get
+    // cloned + sorted in every frame's snapshot. The renderer filters
+    // disposed/absent windows identically and nothing references a window by
+    // handle, so this is behavior-preserving while reclaiming per-frame work.
+    WINDOWS.remove(id);
 }
 
 pub fn set_viewport(id: u32, viewport: Option<u32>) {
@@ -272,7 +276,7 @@ unsafe extern "C" fn window_dispose(argc: c_int, argv: *const VALUE, _self: VALU
         return rb_sys::Qnil as VALUE;
     }
     let id = value_to_i32(*argv) as u32;
-    WINDOWS.with_mut(id, |window| window.disposed = true);
+    dispose(id);
     rb_sys::Qnil as VALUE
 }
 
