@@ -29,17 +29,20 @@ pub enum InterpreterCommand {
 pub fn init() -> Result<()> {
     let module = native_module()?;
     unsafe {
+        // argc = -1: these use the variadic (argc, argv, self) C ABI. Registering
+        // a fixed argc would make Ruby invoke them with the fixed-arity ABI
+        // (self, arg0…), so argc/argv would read garbage registers — UB.
         rb_define_module_function(
             module,
             c_name(REQUEST_PAUSE_NAME),
             Some(interpreter_request_pause),
-            0,
+            -1,
         );
         rb_define_module_function(
             module,
             c_name(REQUEST_MAP_RELOAD_NAME),
             Some(interpreter_request_map_reload),
-            1,
+            -1,
         );
     }
     Ok(())

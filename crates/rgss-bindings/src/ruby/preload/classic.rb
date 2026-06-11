@@ -159,25 +159,64 @@ class << Kernel
   end
 end
 
-# Self-heal a stuck @message_waiting=true on the map interpreter. We've
-# observed (Oak intro path in PE 21.1) that on the first observed
-# Interpreter#update the flag is already true even though no message window
-# exists and pbMessage was never reached. Without recovery, the interpreter
-# returns at line 104 of update on every frame and the autorun never
-# advances past the first Show Text.
+# Recover a stranded @message_waiting flag on the map interpreter.
 #
-# Recovery rule: clear @message_waiting only when no message window is
-# actually showing (pbCreateMessageWindow sets $game_temp.message_window_showing
-# and pbDisposeMessageWindow clears it). With a real message window up, leave
-# the flag alone so legit pbMessage waits keep working.
+# Symptom (Oak intro path in PE 21.1): on the first Interpreter#update the flag
+# is already true with no message window up, so update returns early at
+# 033_Interpreter.rb:104 every frame and the autorun never advances past the
+# first Show Text.
 #
-# Root cause is open — see SESSION_PROGRESS.md. This is a band-aid.
+# Mechanism: command_101/102/103 set @message_waiting=true, call the BLOCKING
+# pbMessage/pbShowCommands, then set it false. That clear is skipped only on a
+# non-local exit — an exception unwinding past the reset, or the main Fiber being
+# torn down/reinstalled mid-message while $game_system.map_interpreter (a global)
+# survives. The flag is then orphaned true.
+#
+# Fix below is in two precise, vanilla-safe parts (see the module): an `ensure`
+# on the message commands for the exception path, and a scoped update fallback
+# for the Fiber-teardown path. Both no-op for games that don't use PE's message
+# system, so vanilla RMXP (which manages the flag via Window_Message) is untouched.
 module InterpreterMessageWaitingRecovery
+  # Returns the PE message-system state:
+  #   true  -> a message window is currently showing
+  #   false -> PE message system present, no window showing
+  #   nil   -> game does not use PE's message system (e.g. vanilla RMXP)
+  # Vanilla RMXP has no $game_temp.message_window_showing and drives
+  # @message_waiting through Window_Message, so we must NOT touch the flag there.
+  def self.message_window_state
+    gt = (defined?($game_temp) ? $game_temp : nil)
+    return nil unless gt && gt.respond_to?(:message_window_showing)
+    gt.message_window_showing ? true : false
+  end
+
+  # Precise root-cause guard: command_101/102/103 set @message_waiting=true, call
+  # the blocking pbMessage/pbShowCommands, then clear it. If that body exits
+  # non-locally (an exception unwinds past the explicit reset), the flag is left
+  # stranded. This `ensure` clears ONLY a flag this command itself raised, and
+  # only when no message window is up — so normal completion (flag already false
+  # here) and legitimate waits are untouched. No per-frame polling, no race.
+  [:command_101, :command_102, :command_103].each do |cmd|
+    define_method(cmd) do |*args, &blk|
+      raised = !@message_waiting
+      begin
+        super(*args, &blk)
+      ensure
+        if raised && @message_waiting &&
+           InterpreterMessageWaitingRecovery.message_window_state == false
+          @message_waiting = false
+        end
+      end
+    end
+  end
+
+  # Fallback for the case the `ensure` above can't catch: the main Fiber is torn
+  # down and reinstalled mid-message while $game_system.map_interpreter survives,
+  # so the stack that would have cleared the flag is discarded. On the next
+  # update the flag is stuck true with no window. Scoped to the PE message system
+  # (state == false) so vanilla games are never affected.
   def update
-    if @message_waiting
-      gt = (defined?($game_temp) ? $game_temp : nil)
-      showing = gt && gt.respond_to?(:message_window_showing) && gt.message_window_showing
-      @message_waiting = false unless showing
+    if @message_waiting && InterpreterMessageWaitingRecovery.message_window_state == false
+      @message_waiting = false
     end
     super
   end

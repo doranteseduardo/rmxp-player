@@ -158,6 +158,18 @@ pub unsafe fn wrap_typed_data<T>(
     rb_data_typed_object_wrap(klass, Box::into_raw(boxed) as *mut c_void, data_type)
 }
 
+/// Borrow the native payload behind a Ruby typed-data `VALUE`.
+///
+/// SAFETY/aliasing contract: the returned `&mut T` aliases the object's boxed
+/// payload. Callers MUST scope it to a single, self-contained access (read or
+/// write one or more fields, then drop it) and MUST NOT hold it across another
+/// `get_typed_data` call for the same `value`, nor across any Ruby call that
+/// could re-enter and borrow the same object. All current callers follow this
+/// (each takes the borrow, touches fields, and returns within the same fn body).
+/// `clippy::mut_from_ref` is allowed because the shared input is only the
+/// `&'static rb_data_type_t` tag, not the data itself — the data is reached
+/// through the raw `RTYPEDDATA_GET_DATA` pointer.
+#[allow(clippy::mut_from_ref)]
 pub unsafe fn get_typed_data<T>(
     value: VALUE,
     data_type: &'static rb_data_type_t,

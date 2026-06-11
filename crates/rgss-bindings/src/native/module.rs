@@ -108,11 +108,12 @@ unsafe fn define_native_functions(module: VALUE) -> Result<()> {
         Some(native_project_path),
         -1,
     );
+    // argc = -1 to match the variadic (argc, argv, self) signature, like the others.
     rb_define_module_function(
         module,
         c_name(CONFIG_PATH_NAME),
         Some(native_config_path),
-        0,
+        -1,
     );
     rb_define_module_function(module, c_name(SAVE_PATH_NAME), Some(native_save_path), -1);
     rb_define_module_function(module, c_name(CLASS_OF_NAME), Some(native_class_of), -1);

@@ -103,9 +103,11 @@ pub fn load_relative(path: &str) -> Result<u32> {
 }
 
 pub fn dispose(id: u32) {
-    BITMAPS.with_mut(id, |entry| {
-        entry.disposed = true;
-    });
+    // Remove the entry entirely so its texture (Arc<RgbaImage>) is freed instead
+    // of retained for the process lifetime. is_disposed() returns true for an
+    // absent id (unwrap_or(true)) and the renderer filters disposed/absent
+    // bitmaps identically, so behavior is unchanged while memory is reclaimed.
+    BITMAPS.remove(id);
 }
 
 pub fn is_disposed(id: u32) -> bool {
