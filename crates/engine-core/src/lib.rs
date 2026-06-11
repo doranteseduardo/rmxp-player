@@ -224,6 +224,18 @@ pub fn run(config: AppConfig) -> Result<()> {
                         if event.state == ElementState::Pressed {
                             if let Key::Named(NamedKey::Backspace) = event.logical_key {
                                 input_state.push_backspace();
+                            } else if let Some(text) = &event.text {
+                                // winit resolves the typed text (keyboard layout
+                                // and shift aware) in `event.text`. The Ime::Commit
+                                // path above only fires for composed/IME input, so
+                                // without this, plain keyboard typing never reaches
+                                // Input.gets — PE's name-entry screen then receives
+                                // no characters and hangs waiting for input.
+                                // (Buffering is gated on Input.text_input in the
+                                // bindings, so this is a no-op outside text entry.)
+                                for ch in text.chars() {
+                                    input_state.push_text_char(ch);
+                                }
                             }
                         }
                     }
